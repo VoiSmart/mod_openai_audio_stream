@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.18)
-project(mod_audio_stream
+project(mod_openai_audio_stream
         VERSION 1.0.0
         DESCRIPTION "Audio streaming module for FreeSWITCH."
-        HOMEPAGE_URL "https://github.com/amigniter/mod_audio_stream")
+        HOMEPAGE_URL "https://github.com/amigniter/mod_openai_audio_stream") #TODO: Update 
 
 include(GNUInstallDirs)
 
@@ -34,14 +34,14 @@ if(CMAKE_BUILD_TYPE MATCHES "Release")
     set_target_properties(ixwebsocket PROPERTIES LINK_FLAGS_RELEASE "-s -w") #-static-libgcc -static-libstdc++
 endif()
 
-add_library(mod_audio_stream SHARED mod_audio_stream.c mod_audio_stream.h audio_streamer_glue.h audio_streamer_glue.cpp buffer/ringbuffer.c base64.cpp)
+add_library(mod_openai_audio_stream SHARED mod_openai_audio_stream.c mod_openai_audio_stream.h openai_audio_streamer_glue.h openai_audio_streamer_glue.cpp buffer/ringbuffer.c base64.cpp)
 
-set_property(TARGET mod_audio_stream PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET mod_openai_audio_stream PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-target_include_directories(mod_audio_stream PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libs/IXWebSocket)
+target_include_directories(mod_openai_audio_stream PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libs/IXWebSocket)
 
-target_link_libraries(mod_audio_stream PRIVATE PkgConfig::FreeSWITCH pthread)
-target_link_libraries (mod_audio_stream PRIVATE ixwebsocket)
+target_link_libraries(mod_openai_audio_stream PRIVATE PkgConfig::FreeSWITCH pthread)
+target_link_libraries (mod_openai_audio_stream PRIVATE ixwebsocket)
 
 set(CPACK_COMPONENTS_ALL ${PROJECT_NAME} changelog.gz copyright)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libspeexdsp1, openssl, zlib1g, libfreeswitch1")

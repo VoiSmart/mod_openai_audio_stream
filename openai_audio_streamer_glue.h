@@ -1,6 +1,6 @@
-#ifndef AUDIO_STREAMER_GLUE_H
-#define AUDIO_STREAMER_GLUE_H
-#include "mod_audio_stream.h"
+#ifndef OPENAI_AUDIO_STREAMER_GLUE_H
+#define OPENAI_AUDIO_STREAMER_GLUE_H
+#include "mod_openai_audio_stream.h"
 
 
 
@@ -13,4 +13,4 @@ switch_status_t stream_session_init(switch_core_session_t *session, responseHand
 switch_bool_t stream_frame(switch_media_bug_t *bug);
 switch_status_t stream_session_cleanup(switch_core_session_t *session, char* text, int channelIsClosing);
 
-#endif //AUDIO_STREAMER_GLUE_H
+#endif // OPENAI_AUDIO_STREAMER_GLUE_H

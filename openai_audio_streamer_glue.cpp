@@ -1,6 +1,6 @@
 #include <string>
 #include <cstring>
-#include "mod_audio_stream.h"
+#include "mod_openai_audio_stream.h"
 #include <ixwebsocket/IXWebSocket.h>
 
 #include <switch_json.h>
@@ -288,6 +288,7 @@ public:
         return (webSocket.getReadyState() == ix::ReadyState::Open);
     }
 
+    // This is where we should send Base-64 encoded binary data to the server
     void writeBinary(uint8_t* buffer, size_t len) {
         if(!this->isConnected()) return;
         webSocket.sendBinary( ix::IXWebSocketSendData((char *)buffer, len) );

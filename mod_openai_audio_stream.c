@@ -1,15 +1,16 @@
 /*
- * mod_audio_stream FreeSWITCH module to stream audio to websocket and receive response
+ * Openai mod_audio_stream FreeSWITCH module to stream audio to websocket and receive responses from OpenAI Realtime API.
  */
-#include "mod_audio_stream.h"
-#include "audio_streamer_glue.h"
+#include "mod_openai_audio_stream.h"
+#include "openai_audio_streamer_glue.h"
 
-SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_audio_stream_shutdown);
-SWITCH_MODULE_RUNTIME_FUNCTION(mod_audio_stream_runtime);
-SWITCH_MODULE_LOAD_FUNCTION(mod_audio_stream_load);
+SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_openai_audio_stream_shutdown);
+SWITCH_MODULE_RUNTIME_FUNCTION(mod_openai_audio_stream_runtime);
+SWITCH_MODULE_LOAD_FUNCTION(mod_openai_audio_stream_load);
 
-SWITCH_MODULE_DEFINITION(mod_audio_stream, mod_audio_stream_load, mod_audio_stream_shutdown, NULL /*mod_audio_stream_runtime*/);
+SWITCH_MODULE_DEFINITION(mod_openai_audio_stream, mod_openai_audio_stream_load, mod_openai_audio_stream_shutdown, NULL /*mod_audio_stream_runtime*/);
 
+// This is where the response are handled and sent to the channel
 static void responseHandler(switch_core_session_t* session, const char* eventName, const char* json) {
     switch_event_t *event;
     switch_channel_t *channel = switch_core_session_get_channel(session);
@@ -17,6 +18,16 @@ static void responseHandler(switch_core_session_t* session, const char* eventNam
     switch_channel_event_set_data(channel, event);
     if (json) switch_event_add_body(event, "%s", json);
     switch_event_fire(&event);
+
+  if (json && strstr(json, "\"response.audio.delta\"")) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "responseHandler: got delta in response, parsing... \n");
+        cJSON *jsonAudio = cJSON_Parse(json);
+        if (jsonAudio) { 
+            // Here is where the JSON should be parsed to extract and decode OPENAI audio payload
+        }
+        
+    }
+
 }
 
 static switch_bool_t capture_callback(switch_media_bug_t *bug, void *user_data, switch_abc_type_t type)
