@@ -2,6 +2,7 @@
 #define MOD_OPENAI_AUDIO_STREAM_H
 
 #include <switch.h>
+#include <limits.h>
 #include <speex/speex_resampler.h>
 #include "buffer/ringbuffer.h"
 
@@ -17,6 +18,12 @@
 #define EVENT_PLAY              "mod_openai_audio_stream::play"
 
 typedef void (*responseHandler_t)(switch_core_session_t* session, const char* eventName, const char* json);
+
+typedef struct {
+    FILE *fp;
+    char path[PATH_MAX];
+    uint32_t total_data_bytes;
+} wav_writer_t;
 
 struct private_data {
     switch_mutex_t *mutex;
@@ -34,6 +41,8 @@ struct private_data {
     switch_buffer_t *sbuffer;
     uint8_t *data;
     int rtp_packets;
+    wav_writer_t *wav_writer;
+    int displace_started;
 };
 
 typedef struct private_data private_t;
