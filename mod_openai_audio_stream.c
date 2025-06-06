@@ -19,14 +19,15 @@ static void responseHandler(switch_core_session_t* session, const char* eventNam
     if (json) switch_event_add_body(event, "%s", json);
     switch_event_fire(&event);
 
-  if (json && strstr(json, "\"response.audio.delta\"")) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "responseHandler: got delta in response, parsing... \n");
-        cJSON *jsonAudio = cJSON_Parse(json);
-        if (jsonAudio) { 
-            // Here is where the JSON should be parsed to extract and decode OPENAI audio payload
-        }
-        
-    }
+    /*
+      if (json && strstr(json, "\"response.audio.delta\"")) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "responseHandler: got delta in response, parsing... \n");
+            cJSON *jsonAudio = cJSON_Parse(json);
+            if (jsonAudio) { 
+                // Here is where the JSON should be parsed to extract and decode OPENAI audio payload
+            }
+            
+    }*/
 
 }
 
@@ -256,7 +257,7 @@ done:
     return SWITCH_STATUS_SUCCESS;
 }
 
-SWITCH_MODULE_LOAD_FUNCTION(mod_audio_stream_load)
+SWITCH_MODULE_LOAD_FUNCTION(mod_openai_audio_stream_load)
 {
     switch_api_interface_t *api_interface;
 
@@ -273,13 +274,13 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_audio_stream_load)
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Couldn't register an event subclass for mod_audio_stream API.\n");
         return SWITCH_STATUS_TERM;
     }
-    SWITCH_ADD_API(api_interface, "uuid_audio_stream", "audio_stream API", stream_function, STREAM_API_SYNTAX);
-    switch_console_set_complete("add uuid_audio_stream ::console::list_uuid start wss-url metadata");
-    switch_console_set_complete("add uuid_audio_stream ::console::list_uuid start wss-url");
-    switch_console_set_complete("add uuid_audio_stream ::console::list_uuid stop");
-    switch_console_set_complete("add uuid_audio_stream ::console::list_uuid pause");
-    switch_console_set_complete("add uuid_audio_stream ::console::list_uuid resume");
-    switch_console_set_complete("add uuid_audio_stream ::console::list_uuid send_text");
+    SWITCH_ADD_API(api_interface, "uuid_openai_audio_stream", "audio_stream API", stream_function, STREAM_API_SYNTAX);
+    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid start wss-url metadata");
+    switch_console_set_complete("add uuid_opeani_audio_stream ::console::list_uuid start wss-url");
+    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid stop");
+    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid pause");
+    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid resume");
+    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid send_text");
 
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "mod_audio_stream API successfully loaded\n");
 
@@ -290,7 +291,7 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_audio_stream_load)
 /*
   Called when the system shuts down
   Macro expands to: switch_status_t mod_audio_stream_shutdown() */
-SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_audio_stream_shutdown)
+SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_openai_audio_stream_shutdown)
 {
     switch_event_free_subclass(EVENT_JSON);
     switch_event_free_subclass(EVENT_CONNECT);
