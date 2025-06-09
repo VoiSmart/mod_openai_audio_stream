@@ -25,8 +25,8 @@ pkg_check_modules(FreeSWITCH REQUIRED IMPORTED_TARGET freeswitch)
 pkg_get_variable(FS_MOD_DIR freeswitch modulesdir)
 message(STATUS "FreeSWITCH modules dir: ${FS_MOD_DIR}")
 
-#set(USE_TLS ON CACHE BOOL "Use TLS for secure WebSocket connections" FORCE)
 set(IXWEBSOCKET_INSTALL OFF CACHE BOOL "Disable ixwebsocket installation" FORCE)
+set(USE_TLS ON CACHE BOOL "Use TLS for secure WebSocket connections" FORCE)
 add_subdirectory(libs/IXWebSocket)
 
 if(CMAKE_BUILD_TYPE MATCHES "Release")
