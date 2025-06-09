@@ -44,6 +44,7 @@ public:
         // NONE, which disables validation and SYSTEM which uses
         // the system CAs bundle
         if (tls_cafile) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "setting TLS CA file: %s\n", tls_cafile); //TODO: remove
             tlsOptions.caFile = tls_cafile;
         }
 
@@ -114,7 +115,7 @@ public:
                 switch_safe_free(json_str);
             }
             else if (msg->type == ix::WebSocketMessageType::Close)
-            {
+/ TO            {
                 // The server can send an explicit code and reason for closing.
                 // This data can be accessed through the closeInfo object.
                 cJSON *root, *message;
@@ -190,6 +191,11 @@ public:
                     std::string msg(message);
                     if(processMessage(psession, msg) != SWITCH_TRUE) {
                         m_notify(psession, EVENT_JSON, msg.c_str());
+                    }
+
+                    // TODO: remove this guided crash it is here for first testing and debugging purposes
+                    if (strstr(msg.c_str(), "Missing bearer") != NULL) {
+                        eventCallback(CONNECT_ERROR, "Missing Bearer, cloud not connect to realtime openai service.\n");
                     }
                     if(!m_suppress_log)
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(psession), SWITCH_LOG_DEBUG, "response: %s\n", msg.c_str());
@@ -301,12 +307,15 @@ public:
         // Encode the PCM16 data as base64
         std::string base64Audio = base64_encode(reinterpret_cast<const unsigned char*>(pcm16Data.data()), pcm16Data.size() * sizeof(int16_t));
 
+        if (base64Audio.empty()) return;
+
         // Prepare the JSON message
         cJSON *root = cJSON_CreateObject();
         cJSON_AddStringToObject(root, "type", "input_audio_buffer.append");
         cJSON_AddStringToObject(root, "audio", base64Audio.c_str());
 
         char *jsonStr = cJSON_PrintUnformatted(root);
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "sending binary data: %s\n", jsonStr); // TODO: remove debug
         webSocket.sendUtf8Text(ix::IXWebSocketSendData(jsonStr, strlen(jsonStr)));
 
         cJSON_Delete(root);
@@ -315,6 +324,7 @@ public:
 
     void writeText(const char* text) {
         if(!this->isConnected()) return;
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "sending text: %s\n", text); // TODO: remove debug 
         webSocket.sendUtf8Text(ix::IXWebSocketSendData(text, strlen(text)));
     }
 
@@ -623,6 +633,7 @@ extern "C" {
         }
 
         extra_headers = switch_channel_get_variable(channel, "STREAM_EXTRA_HEADERS");
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "[GUARD] extra headers: %s channel: %s\n", extra_headers ? extra_headers : "NULL", switch_channel_get_uuid(channel)); //TODO: remove
 
         // allocate per-session tech_pvt
         auto* tech_pvt = (private_t *) switch_core_session_alloc(session, sizeof(private_t));

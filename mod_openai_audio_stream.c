@@ -26,19 +26,20 @@ wav_writer_t *wav_open_appendable(const char *uuid, int sample_rate) {
     uint32_t sample_rate_u32 = (uint32_t)sample_rate;
     uint32_t data_chunk_size = 0;
 
-    fwrite("RIFF", 1, 4, writer->fp);
-    fwrite(&chunk_size, 4, 1, writer->fp);
-    fwrite("WAVE", 1, 4, writer->fp);
-    fwrite("fmt ", 1, 4, writer->fp);
-    fwrite(&fmt_chunk_size, 4, 1, writer->fp);
-    fwrite(&audio_format, 2, 1, writer->fp);
-    fwrite(&num_channels, 2, 1, writer->fp);
-    fwrite(&sample_rate_u32, 4, 1, writer->fp);
-    fwrite(&byte_rate, 4, 1, writer->fp);
-    fwrite(&block_align, 2, 1, writer->fp);
-    fwrite(&bits_per_sample, 2, 1, writer->fp);
-    fwrite("data", 1, 4, writer->fp);
-    fwrite(&data_chunk_size, 4, 1, writer->fp);
+    // Write the WAV header, initially placeholder for the data chunk size
+    fwrite("RIFF", 1, 4, writer->fp);              // Signature: "RIFF"
+    fwrite(&chunk_size, 4, 1, writer->fp);         // Total file size - 8 bytes
+    fwrite("WAVE", 1, 4, writer->fp);              // Signature: "WAVE"
+    fwrite("fmt ", 1, 4, writer->fp);              // Subchunk 1 ID: "fmt "
+    fwrite(&fmt_chunk_size, 4, 1, writer->fp);     // Subchunk1Size: always 16 for PCM
+    fwrite(&audio_format, 2, 1, writer->fp);       // PCM = 1 (linear quantization)
+    fwrite(&num_channels, 2, 1, writer->fp);       // Mono = 1, Stereo = 2
+    fwrite(&sample_rate_u32, 4, 1, writer->fp);    // e.g., 16000
+    fwrite(&byte_rate, 4, 1, writer->fp);          // == SampleRate * NumChannels * BitsPerSample/8
+    fwrite(&block_align, 2, 1, writer->fp);        // == NumChannels * BitsPerSample/8
+    fwrite(&bits_per_sample, 2, 1, writer->fp);    // e.g., 16
+    fwrite("data", 1, 4, writer->fp);              // Subchunk 2 ID: "data"
+    fwrite(&data_chunk_size, 4, 1, writer->fp);    // Placeholder: to be updated in close
 
     fflush(writer->fp);
     return writer;
@@ -248,10 +249,10 @@ static switch_status_t send_text(switch_core_session_t *session, char* text) {
     return status;
 }
 
-#define STREAM_API_SYNTAX "<uuid> [start | stop | send_text | pause | resume | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000] [metadata]"
+#define STREAM_API_SYNTAX "<uuid> [start | stop | send_text | pause | resume | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000] [metadata] [openaikey]"
 SWITCH_STANDARD_API(stream_function)
 {
-    char *mycmd = NULL, *argv[6] = { 0 };
+    char *mycmd = NULL, *argv[7] = { 0 };
     int argc = 0;
 
     switch_status_t status = SWITCH_STATUS_FALSE;
@@ -341,6 +342,18 @@ SWITCH_STANDARD_API(stream_function)
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                   "unsupported mod_openai_audio_stream cmd: %s\n", argv[1]);
             }
+
+            // TODO: manage api key with channel variable
+            switch_channel_t *channel = switch_core_session_get_channel(lsession); //TODO: check if we have a valid channel maybe? should always be located
+            char *apikey = argc > 6 ? argv[6] : NULL;
+            if (apikey) {
+                char headers_buf[512] = {0};
+                snprintf(headers_buf, sizeof(headers_buf),
+                         "{\"Authorization\": \"Bearer %s\", \"OpenAI-Beta\": \"realtime=v1\"}", apikey);
+                switch_channel_set_variable(channel, "STREAM_EXTRA_HEADERS", headers_buf);
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(lsession), SWITCH_LOG_DEBUG, "[GUARD] setting extra headers: %s channel: %s\n", headers_buf, switch_channel_get_uuid(channel)); //TODO: remove
+            }
+
             switch_core_session_rwunlock(lsession);
         } else {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Error locating session %s\n",
