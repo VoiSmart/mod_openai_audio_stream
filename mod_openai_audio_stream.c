@@ -10,68 +10,6 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_openai_audio_stream_load);
 
 SWITCH_MODULE_DEFINITION(mod_openai_audio_stream, mod_openai_audio_stream_load, mod_openai_audio_stream_shutdown, NULL /*mod_openai_audio_stream_runtime*/);
 
-wav_writer_t *wav_open_appendable(const char *uuid, int sample_rate) {
-    wav_writer_t *writer = calloc(1, sizeof(wav_writer_t));
-    snprintf(writer->path, sizeof(writer->path), "/tmp/openai_response_%s.wav", uuid);
-    writer->fp = fopen(writer->path, "wb+");
-    if (!writer->fp) return NULL;
-
-    uint32_t chunk_size = 36;
-    uint32_t fmt_chunk_size = 16;
-    uint16_t audio_format = 1;
-    uint16_t num_channels = 1;
-    uint16_t bits_per_sample = 16;
-    uint32_t byte_rate = sample_rate * num_channels * bits_per_sample / 8;
-    uint16_t block_align = num_channels * bits_per_sample / 8;
-    uint32_t sample_rate_u32 = (uint32_t)sample_rate;
-    uint32_t data_chunk_size = 0;
-
-    // Write the WAV header, initially placeholder for the data chunk size
-    fwrite("RIFF", 1, 4, writer->fp);              // Signature: "RIFF"
-    fwrite(&chunk_size, 4, 1, writer->fp);         // Total file size - 8 bytes
-    fwrite("WAVE", 1, 4, writer->fp);              // Signature: "WAVE"
-    fwrite("fmt ", 1, 4, writer->fp);              // Subchunk 1 ID: "fmt "
-    fwrite(&fmt_chunk_size, 4, 1, writer->fp);     // Subchunk1Size: always 16 for PCM
-    fwrite(&audio_format, 2, 1, writer->fp);       // PCM = 1 (linear quantization)
-    fwrite(&num_channels, 2, 1, writer->fp);       // Mono = 1, Stereo = 2
-    fwrite(&sample_rate_u32, 4, 1, writer->fp);    // e.g., 16000
-    fwrite(&byte_rate, 4, 1, writer->fp);          // == SampleRate * NumChannels * BitsPerSample/8
-    fwrite(&block_align, 2, 1, writer->fp);        // == NumChannels * BitsPerSample/8
-    fwrite(&bits_per_sample, 2, 1, writer->fp);    // e.g., 16
-    fwrite("data", 1, 4, writer->fp);              // Subchunk 2 ID: "data"
-    fwrite(&data_chunk_size, 4, 1, writer->fp);    // Placeholder: to be updated in close
-
-    fflush(writer->fp);
-    return writer;
-}
-
-switch_status_t wav_append_chunk(wav_writer_t *writer, const uint8_t *data, size_t len) {
-    if (!writer || !writer->fp) return SWITCH_STATUS_FALSE;
-    fseek(writer->fp, 0, SEEK_END);
-    size_t written = fwrite(data, 1, len, writer->fp);
-    fflush(writer->fp);
-    writer->total_data_bytes += (uint32_t)written;
-    return SWITCH_STATUS_SUCCESS;
-}
-
-void wav_close_and_fix_header(wav_writer_t *writer) {
-    if (!writer || !writer->fp) return;
-
-    uint32_t chunk_size = 36 + writer->total_data_bytes;
-
-    fseek(writer->fp, 4, SEEK_SET);
-    fwrite(&chunk_size, 4, 1, writer->fp);
-
-    fseek(writer->fp, 40, SEEK_SET);
-    fwrite(&writer->total_data_bytes, 4, 1, writer->fp);
-
-    fclose(writer->fp);
-    writer->fp = NULL;
-
-    free(writer);
-}
-
-
 // This is where the response are handled and sent to the channel
 static void responseHandler(switch_core_session_t* session, const char* eventName, const char* json) {
     switch_event_t *event;
@@ -80,50 +18,7 @@ static void responseHandler(switch_core_session_t* session, const char* eventNam
     switch_channel_event_set_data(channel, event);
     if (json) switch_event_add_body(event, "%s", json);
     switch_event_fire(&event);
-
-    if (json && strstr(json, "\"response.audio.delta\"")) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "responseHandler: got delta in response, parsing... \n");
-        cJSON *jsonAudio = cJSON_Parse(json);
-        if (jsonAudio) { 
-            // Here is where the JSON should be parsed to extract and decode OPENAI audio payload
-            cJSON *delta_obj = cJSON_GetObjectItem(jsonAudio, "delta");
-            if (delta_obj && delta_obj->type == cJSON_String) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "responseHandler: got delta audio as string, now decoding\n");
-                const char *audio_base64 = delta_obj->valuestring;
-                switch_size_t decoded_len = strlen(audio_base64);
-                switch_size_t audio_data_len = (decoded_len * 3) / 4;
-                switch_byte_t *audio_data = malloc(audio_data_len);
-
-                if (audio_data) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "responseHandler: got audio from string \n");
-                    switch_size_t decoded_size = switch_b64_decode(audio_base64, (char *)audio_data, audio_data_len);
-
-
-                    private_t *tech_pvt = switch_core_session_get_private(session);
-                    if (tech_pvt) { // Check if we have a valid tech_pvt if not the session is not initialized properly
-                        wav_append_chunk(tech_pvt->wav_writer, audio_data, decoded_size);
-                        // Start displace playback of the audio ONCE only on the first audio data received and never worry about it again
-                        if (!tech_pvt->displace_started) {
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Starting displace playback...\n");
-                            switch_ivr_displace_session(session, tech_pvt->wav_writer->path, 0, "w");
-                            tech_pvt->displace_started = 1;
-                        }
-
-                    } else {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "responseHandler: No stream session data\n");
-                    }
-                    free(audio_data);
-                } else {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "responseHandler: failed to allocate memory for audio data\n");
-                }
-            }
-            cJSON_Delete(jsonAudio);
-        }
-
-    } else {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "responseHandler: got event %s with json: %s\n", eventName, json ? json : "NULL");
-    }
-
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "responseHandler: starting to handle response \n");
 }
 
 static switch_bool_t capture_callback(switch_media_bug_t *bug, void *user_data, switch_abc_type_t type)
@@ -134,14 +29,11 @@ static switch_bool_t capture_callback(switch_media_bug_t *bug, void *user_data, 
     switch (type) {
         case SWITCH_ABC_TYPE_INIT:
             const char *uuid = switch_core_session_get_uuid(session);
-            tech_pvt->wav_writer = wav_open_appendable(uuid, 16000);
             break;
 
         case SWITCH_ABC_TYPE_CLOSE:
             {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Got SWITCH_ABC_TYPE_CLOSE.\n");
-                wav_close_and_fix_header(tech_pvt->wav_writer);
-                tech_pvt->wav_writer = NULL;
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Got SWITCH_ABC_TYPE_CLOSE.\n"); 
 
                 // Check if this is a normal channel closure or a requested closure
                 int channelIsClosing = tech_pvt->close_requested ? 0 : 1;
@@ -249,7 +141,7 @@ static switch_status_t send_text(switch_core_session_t *session, char* text) {
     return status;
 }
 
-#define STREAM_API_SYNTAX "<uuid> [start | stop | send_text | pause | resume | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000] [metadata] [openaikey]"
+#define STREAM_API_SYNTAX "<uuid> [start | stop | send_text | pause | resume | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000 | 24000] [metadata] [openaikey]"
 SWITCH_STANDARD_API(stream_function)
 {
     char *mycmd = NULL, *argv[7] = { 0 };
@@ -329,6 +221,18 @@ SWITCH_STANDARD_API(stream_function)
                         sampling = atoi(argv[4]);
                     }
                 }
+
+                // TODO: manage api key with channel variable
+                switch_channel_t *channel = switch_core_session_get_channel(lsession); //TODO: check if we have a valid channel maybe? should always be located
+                char *apikey = argc > 6 ? argv[6] : NULL;
+                if (apikey) {
+                    char headers_buf[512] = {0};
+                    snprintf(headers_buf, sizeof(headers_buf),
+                             "{\"Authorization\": \"Bearer %s\", \"OpenAI-Beta\": \"realtime=v1\"}", apikey);
+                    switch_channel_set_variable(channel, "STREAM_EXTRA_HEADERS", headers_buf);
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(lsession), SWITCH_LOG_DEBUG, "[GUARD] setting extra headers: %s channel: %s\n", headers_buf, switch_channel_get_uuid(channel)); //TODO: remove
+                }
+
                 if (!validate_ws_uri(argv[2], &wsUri[0])) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                       "invalid websocket uri: %s\n", argv[2]);
@@ -343,16 +247,6 @@ SWITCH_STANDARD_API(stream_function)
                                   "unsupported mod_openai_audio_stream cmd: %s\n", argv[1]);
             }
 
-            // TODO: manage api key with channel variable
-            switch_channel_t *channel = switch_core_session_get_channel(lsession); //TODO: check if we have a valid channel maybe? should always be located
-            char *apikey = argc > 6 ? argv[6] : NULL;
-            if (apikey) {
-                char headers_buf[512] = {0};
-                snprintf(headers_buf, sizeof(headers_buf),
-                         "{\"Authorization\": \"Bearer %s\", \"OpenAI-Beta\": \"realtime=v1\"}", apikey);
-                switch_channel_set_variable(channel, "STREAM_EXTRA_HEADERS", headers_buf);
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(lsession), SWITCH_LOG_DEBUG, "[GUARD] setting extra headers: %s channel: %s\n", headers_buf, switch_channel_get_uuid(channel)); //TODO: remove
-            }
 
             switch_core_session_rwunlock(lsession);
         } else {

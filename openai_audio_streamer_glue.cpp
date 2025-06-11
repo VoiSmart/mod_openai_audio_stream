@@ -115,7 +115,7 @@ public:
                 switch_safe_free(json_str);
             }
             else if (msg->type == ix::WebSocketMessageType::Close)
-/ TO            {
+                {
                 // The server can send an explicit code and reason for closing.
                 // This data can be accessed through the closeInfo object.
                 cJSON *root, *message;
@@ -173,7 +173,7 @@ public:
         if(psession) {
             switch (event) {
                 case CONNECT_SUCCESS:
-                    send_initial_metadata(psession);
+                    // send_initial_metadata(psession); // TODO: disabled cause openai refuses texts
                     m_notify(psession, EVENT_CONNECT, message);
                     break;
                 case CONNECTION_DROPPED:
@@ -198,7 +198,12 @@ public:
                         eventCallback(CONNECT_ERROR, "Missing Bearer, cloud not connect to realtime openai service.\n");
                     }
                     if(!m_suppress_log)
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(psession), SWITCH_LOG_DEBUG, "response: %s\n", msg.c_str());
+                        if (strstr(msg.c_str(), "response.audio.delta") != NULL ||
+                           strstr(msg.c_str(), "streamAudio") != NULL) {
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(psession), SWITCH_LOG_DEBUG, "response: audio delta\n", msg.c_str()); 
+                        } else {
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(psession), SWITCH_LOG_DEBUG, "response: %s\n", msg.c_str());
+                        }
                     break;
             }
             switch_core_session_rwunlock(psession);
@@ -212,7 +217,49 @@ public:
             return status;
         }
         const char* jsType = cJSON_GetObjectCstr(json, "type");
-        if(jsType && strcmp(jsType, "streamAudio") == 0) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "processMessage: type: %s\n", jsType ? jsType : "null");
+        if(jsType && strcmp(jsType, "response.audio.delta") == 0) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta\n", m_sessionId.c_str());
+            const char* jsonAudio = cJSON_GetObjectCstr(json, "delta");
+            if(jsonAudio) {
+                cJSON* jsonFile = nullptr;
+                std::string fileType = ".r16";
+                if(jsonAudio && !fileType.empty()) {
+                    char filePath[256];
+                    std::string rawAudio;
+                    try {
+                        rawAudio = base64_decode(jsonAudio);
+                    } catch (const std::exception& e) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - base64 decode error: %s\n", m_sessionId.c_str(), e.what());
+                        cJSON_Delete(json);
+                        return status;
+                    }
+                    switch_snprintf(filePath, 256, "%s%s%s_%d.tmp%s", SWITCH_GLOBAL_dirs.temp_dir,
+                                    SWITCH_PATH_SEPARATOR, m_sessionId.c_str(), m_playFile++, fileType.c_str());
+                    std::ofstream fstream(filePath, std::ofstream::binary);
+                    fstream << rawAudio;
+                    std:size_t size = static_cast<std::size_t>(fstream.tellp());
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta file size: %zu\n", m_sessionId.c_str(), size); //TODO: remove
+                    fstream.close();
+                    m_Files.insert(filePath);
+                    jsonFile = cJSON_CreateString(filePath);
+                    cJSON_AddItemToObject(json, "file", jsonFile); 
+                    switch_ivr_play_file(session, NULL, filePath, NULL);
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta playing file: %s\n", m_sessionId.c_str(), filePath); //TODO: remove
+                }
+                if(jsonFile) {
+                    char *jsonString = cJSON_PrintUnformatted(json);
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta sending message: %s\n", m_sessionId.c_str(), jsonString); //TODO: remove
+                    m_notify(session, EVENT_PLAY, jsonString);
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta NOTIFIED\n", m_sessionId.c_str()); //TODO: remove
+                    message.assign(jsonString);
+                    free(jsonString);
+                    status = SWITCH_TRUE;
+                }
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta DONE\n", m_sessionId.c_str());
+                    
+            }
+        } else if(jsType && strcmp(jsType, "streamAudio") == 0) {
             cJSON* jsonData = cJSON_GetObjectItem(json, "data");
             if(jsonData) {
                 cJSON* jsonFile = nullptr;
@@ -298,15 +345,8 @@ public:
     void writeBinary(uint8_t* buffer, size_t len) {
         if(!this->isConnected()) return;
         // Convert the buffer to PCM16 and then base64 encode it.
-        std::vector<int16_t> pcm16Data(len / 2);
-        for (size_t i = 0; i < len / 2; ++i) {
-            uint16_t sample = buffer[i * 2] | (buffer[i * 2 + 1] << 8);
-            pcm16Data[i] = static_cast<int16_t>(sample);
-        }
 
-        // Encode the PCM16 data as base64
-        std::string base64Audio = base64_encode(reinterpret_cast<const unsigned char*>(pcm16Data.data()), pcm16Data.size() * sizeof(int16_t));
-
+        std::string base64Audio = base64_encode(buffer, len, false);
         if (base64Audio.empty()) return;
 
         // Prepare the JSON message
@@ -315,7 +355,6 @@ public:
         cJSON_AddStringToObject(root, "audio", base64Audio.c_str());
 
         char *jsonStr = cJSON_PrintUnformatted(root);
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "sending binary data: %s\n", jsonStr); // TODO: remove debug
         webSocket.sendUtf8Text(ix::IXWebSocketSendData(jsonStr, strlen(jsonStr)));
 
         cJSON_Delete(root);

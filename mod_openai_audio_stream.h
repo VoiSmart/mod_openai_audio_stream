@@ -19,12 +19,6 @@
 
 typedef void (*responseHandler_t)(switch_core_session_t* session, const char* eventName, const char* json);
 
-typedef struct {
-    FILE *fp;
-    char path[PATH_MAX];
-    uint32_t total_data_bytes;
-} wav_writer_t;
-
 struct private_data {
     switch_mutex_t *mutex;
     char sessionId[MAX_SESSION_ID];
@@ -41,8 +35,6 @@ struct private_data {
     switch_buffer_t *sbuffer;
     uint8_t *data;
     int rtp_packets;
-    wav_writer_t *wav_writer;
-    int displace_started;
 };
 
 typedef struct private_data private_t;
