@@ -2,6 +2,8 @@
 #include <cstring>
 #include "mod_openai_audio_stream.h"
 #include <ixwebsocket/IXWebSocket.h>
+#include <sstream>
+#include <queue>
 
 #include <switch_json.h>
 #include <fstream>
@@ -134,6 +136,9 @@ public:
             }
         });
 
+        m_audioThreadRunning = true;
+        m_audioThread = std::thread(&AudioStreamer::processAudioQueue, this);
+
         // Now that our callback is setup, we can start our background thread and receive messages
         webSocket.start();
     }
@@ -210,6 +215,44 @@ public:
         }
     }
 
+    std::string createWavFromRaw(std::string rawAudio) {
+        const int sampleRate = 24000; // OpenAI response Default sr
+        const int numChannels = 1; // mono
+        const int bitsPerSample = 16; // pcm16
+        int byteRate = sampleRate * numChannels * bitsPerSample / 8;
+        int blockAlign = numChannels * bitsPerSample / 8;
+        uint32_t dataSize = rawAudio.size();
+        uint32_t chunkSize = 36 + dataSize;
+
+        std::ostringstream wavStream; // write in string like stream
+
+        // creating wav header
+        // riff header
+        wavStream.write("RIFF", 4); // chunk id
+        wavStream.write(reinterpret_cast<const char*>(&chunkSize), 4); // chunk Size
+        wavStream.write("WAVE", 4); 
+
+        // this subchunk contains format infos
+        wavStream.write("fmt ", 4); 
+        uint32_t subchunk1Size = 16; 
+        wavStream.write(reinterpret_cast<const char*>(&subchunk1Size), 4); 
+        uint16_t audioFormat = 1; // 1 is pcm
+        wavStream.write(reinterpret_cast<const char*>(&audioFormat), 2);
+        wavStream.write(reinterpret_cast<const char*>(&numChannels), 2);
+        wavStream.write(reinterpret_cast<const char*>(&sampleRate), 4);
+        wavStream.write(reinterpret_cast<const char*>(&byteRate), 4);
+        wavStream.write(reinterpret_cast<const char*>(&blockAlign), 2);
+        wavStream.write(reinterpret_cast<const char*>(&bitsPerSample), 2);
+
+        // data subchunk contains audio data
+        wavStream.write("data", 4);
+        wavStream.write(reinterpret_cast<const char*>(&dataSize), 4);
+        wavStream.write(rawAudio.data(), dataSize);
+
+        return wavStream.str();
+
+    }
+
     switch_bool_t processMessage(switch_core_session_t* session, std::string& message) {
         cJSON* json = cJSON_Parse(message.c_str());
         switch_bool_t status = SWITCH_FALSE;
@@ -218,12 +261,15 @@ public:
         }
         const char* jsType = cJSON_GetObjectCstr(json, "type");
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "processMessage: type: %s\n", jsType ? jsType : "null");
+        if(jsType && strstr(jsType, "error")) { 
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - error: %s\n", m_sessionId.c_str(), message.c_str());
+        }
         if(jsType && strcmp(jsType, "response.audio.delta") == 0) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta\n", m_sessionId.c_str());
             const char* jsonAudio = cJSON_GetObjectCstr(json, "delta");
             if(jsonAudio) {
                 cJSON* jsonFile = nullptr;
-                std::string fileType = ".r16";
+                std::string fileType = ".wav";
                 if(jsonAudio && !fileType.empty()) {
                     char filePath[256];
                     std::string rawAudio;
@@ -237,15 +283,26 @@ public:
                     switch_snprintf(filePath, 256, "%s%s%s_%d.tmp%s", SWITCH_GLOBAL_dirs.temp_dir,
                                     SWITCH_PATH_SEPARATOR, m_sessionId.c_str(), m_playFile++, fileType.c_str());
                     std::ofstream fstream(filePath, std::ofstream::binary);
-                    fstream << rawAudio;
-                    std:size_t size = static_cast<std::size_t>(fstream.tellp());
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta file size: %zu\n", m_sessionId.c_str(), size); //TODO: remove
+                    std::string wavData = createWavFromRaw(rawAudio);
+                    fstream.write(wavData.data(), wavData.size());
+                    //std:size_t size = static_cast<std::size_t>(fstream.tellp()); // Used?
+                    fstream.flush(); // flush buffer to os level write
                     fstream.close();
                     m_Files.insert(filePath);
                     jsonFile = cJSON_CreateString(filePath);
                     cJSON_AddItemToObject(json, "file", jsonFile); 
-                    switch_ivr_play_file(session, NULL, filePath, NULL);
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta playing file: %s\n", m_sessionId.c_str(), filePath); //TODO: remove
+                    // switch_ivr_play_file(session, NULL, filePath, NULL);
+                    //
+                    switch_codec_t *codec = switch_core_session_get_read_codec(session); //TODO: remove debug
+                    if (codec) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                            "(%s) Codec in use: %s@%uhz\n", m_sessionId.c_str(),
+                            codec->implementation->iananame,
+                            codec->implementation->actual_samples_per_second);
+                    } 
+                    int duration_ms = static_cast<int>((rawAudio.size() * 1000) / (24000 * 2));
+                    m_audioQueue.push({filePath, duration_ms});
+                    m_audioCv.notify_one(); // notify audio thread to process the queue TODO: maybe this is not needed
                 }
                 if(jsonFile) {
                     char *jsonString = cJSON_PrintUnformatted(json);
@@ -257,80 +314,26 @@ public:
                     status = SWITCH_TRUE;
                 }
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta DONE\n", m_sessionId.c_str());
-                    
+             } else {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - response.audio.delta no audio data\n", m_sessionId.c_str());
             }
-        } else if(jsType && strcmp(jsType, "streamAudio") == 0) {
-            cJSON* jsonData = cJSON_GetObjectItem(json, "data");
-            if(jsonData) {
-                cJSON* jsonFile = nullptr;
-                cJSON* jsonAudio = cJSON_DetachItemFromObject(jsonData, "audioData");
-                const char* jsAudioDataType = cJSON_GetObjectCstr(jsonData, "audioDataType");
-                std::string fileType;
-                int sampleRate;
-                if (0 == strcmp(jsAudioDataType, "raw")) {
-                    cJSON* jsonSampleRate = cJSON_GetObjectItem(jsonData, "sampleRate");
-                    sampleRate = jsonSampleRate && jsonSampleRate->valueint ? jsonSampleRate->valueint : 0;
-                    std::unordered_map<int, const char*> sampleRateMap = {
-                            {8000, ".r8"},
-                            {16000, ".r16"},
-                            {24000, ".r24"},
-                            {32000, ".r32"},
-                            {48000, ".r48"},
-                            {64000, ".r64"}
-                    };
-                    auto it = sampleRateMap.find(sampleRate);
-                    fileType = (it != sampleRateMap.end()) ? it->second : "";
-                } else if (0 == strcmp(jsAudioDataType, "wav")) {
-                    fileType = ".wav";
-                } else if (0 == strcmp(jsAudioDataType, "mp3")) {
-                    fileType = ".mp3";
-                } else if (0 == strcmp(jsAudioDataType, "ogg")) {
-                    fileType = ".ogg";
-                } else {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - unsupported audio type: %s\n",
-                                      m_sessionId.c_str(), jsAudioDataType);
-                }
-
-                if(jsonAudio && jsonAudio->valuestring != nullptr && !fileType.empty()) {
-                    char filePath[256];
-                    std::string rawAudio;
-                    try {
-                        rawAudio = base64_decode(jsonAudio->valuestring);
-                    } catch (const std::exception& e) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - base64 decode error: %s\n",
-                                          m_sessionId.c_str(), e.what());
-                        cJSON_Delete(jsonAudio); cJSON_Delete(json);
-                        return status;
-                    }
-                    switch_snprintf(filePath, 256, "%s%s%s_%d.tmp%s", SWITCH_GLOBAL_dirs.temp_dir,
-                                    SWITCH_PATH_SEPARATOR, m_sessionId.c_str(), m_playFile++, fileType.c_str());
-                    std::ofstream fstream(filePath, std::ofstream::binary);
-                    fstream << rawAudio;
-                    fstream.close();
-                    m_Files.insert(filePath);
-                    jsonFile = cJSON_CreateString(filePath);
-                    cJSON_AddItemToObject(jsonData, "file", jsonFile);
-                }
-
-                if(jsonFile) {
-                    char *jsonString = cJSON_PrintUnformatted(jsonData);
-                    m_notify(session, EVENT_PLAY, jsonString);
-                    message.assign(jsonString);
-                    free(jsonString);
-                    status = SWITCH_TRUE;
-                }
-                if (jsonAudio)
-                    cJSON_Delete(jsonAudio);
-
-            } else {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - no data in streamAudio\n", m_sessionId.c_str());
-            }
-        }
+        } // else manage diff message type from openai
         cJSON_Delete(json);
         return status;
     }
 
-    ~AudioStreamer()= default;
+    ~AudioStreamer() {
+        {
+            std::lock_guard<std::mutex> lock(m_audioMutex);
+            m_audioThreadRunning = false;
+        }
+        m_audioCv.notify_one();
+        if (m_audioThread.joinable()) {
+            m_audioThread.join();
+        }
+        deleteFiles(); // clean tmp files TODO: maybe this is not needed
+    }
+
 
     void disconnect() {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "disconnecting...\n");
@@ -361,10 +364,10 @@ public:
         switch_safe_free(jsonStr);
     }
 
-    void writeText(const char* text) {
+    void writeText(const char* text) { //TODO: IMPORTANT adjust this function cause  sending text makes OpenAI refuse and close websocket 
         if(!this->isConnected()) return;
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "sending text: %s\n", text); // TODO: remove debug 
-        webSocket.sendUtf8Text(ix::IXWebSocketSendData(text, strlen(text)));
+        // webSocket.sendUtf8Text(ix::IXWebSocketSendData(text, strlen(text)));
     }
 
     void deleteFiles() {
@@ -383,6 +386,45 @@ private:
     const char* m_extra_headers;
     int m_playFile;
     std::unordered_set<std::string> m_Files;
+
+    std::queue<std::pair<std::string, int>> m_audioQueue;
+    std::mutex m_audioMutex;
+    std::condition_variable m_audioCv;
+    std::thread m_audioThread;
+    bool m_audioThreadRunning = true;
+
+    void processAudioQueue() {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "[GUARD GUARD GUARD] (%s) AudioStreamer thread started\n", m_sessionId.c_str());
+        while (m_audioThreadRunning) {
+            std::string fileToPlay;
+            int duration_ms = 0;
+            {
+                std::unique_lock<std::mutex> lock(m_audioMutex);
+                m_audioCv.wait(lock, [this]() {return !m_audioQueue.empty() || !m_audioThreadRunning; }); //TODO: maybe this is not needed
+                if (!m_audioThreadRunning) return;
+                if (m_audioQueue.empty()) continue; 
+                auto [filePath, dur] = m_audioQueue.front();
+                fileToPlay = filePath;
+                duration_ms = dur;
+                m_audioQueue.pop();
+            }
+
+            switch_core_session_t* session = switch_core_session_locate(m_sessionId.c_str()); // TODO: check if we have to do this every time
+            if (!session) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "(%s) session not found for audio playback\n", m_sessionId.c_str());
+                return;
+            } 
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) playing audio file: %s for %d ms\n", m_sessionId.c_str(), fileToPlay.c_str(), duration_ms); //TODO: remove debug
+
+            switch_ivr_displace_session(session, fileToPlay.c_str(), 0, "m");
+            //sleep for audio duration
+            std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) finished playing audio file: %s\n", m_sessionId.c_str(), fileToPlay.c_str()); //TODO: remove debug
+            switch_core_session_rwunlock(session);
+            // may stop displace session
+        }
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "[GUARD GUARD GUARD] (%s) AudioStreamer thread stopped\n", m_sessionId.c_str());
+    }
 };
 
 
