@@ -46,7 +46,6 @@ public:
         // NONE, which disables validation and SYSTEM which uses
         // the system CAs bundle
         if (tls_cafile) {
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "setting TLS CA file: %s\n", tls_cafile); //TODO: remove
             tlsOptions.caFile = tls_cafile;
         }
 
@@ -178,7 +177,7 @@ public:
         if(psession) {
             switch (event) {
                 case CONNECT_SUCCESS:
-                    // send_initial_metadata(psession); // TODO: disabled cause openai refuses texts
+                    // send_initial_metadata(psession); // TODO: sending first session update here
                     m_notify(psession, EVENT_CONNECT, message);
                     break;
                 case CONNECTION_DROPPED:
@@ -291,24 +290,13 @@ public:
                     m_Files.insert(filePath);
                     jsonFile = cJSON_CreateString(filePath);
                     cJSON_AddItemToObject(json, "file", jsonFile); 
-                    // switch_ivr_play_file(session, NULL, filePath, NULL);
-                    //
-                    switch_codec_t *codec = switch_core_session_get_read_codec(session); //TODO: remove debug
-                    if (codec) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
-                            "(%s) Codec in use: %s@%uhz\n", m_sessionId.c_str(),
-                            codec->implementation->iananame,
-                            codec->implementation->actual_samples_per_second);
-                    } 
                     int duration_ms = static_cast<int>((rawAudio.size() * 1000) / (24000 * 2));
                     m_audioQueue.push({filePath, duration_ms});
                     m_audioCv.notify_one(); // notify audio thread to process the queue TODO: maybe this is not needed
                 }
                 if(jsonFile) {
                     char *jsonString = cJSON_PrintUnformatted(json);
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta sending message: %s\n", m_sessionId.c_str(), jsonString); //TODO: remove
                     m_notify(session, EVENT_PLAY, jsonString);
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta NOTIFIED\n", m_sessionId.c_str()); //TODO: remove
                     message.assign(jsonString);
                     free(jsonString);
                     status = SWITCH_TRUE;
@@ -331,7 +319,6 @@ public:
         if (m_audioThread.joinable()) {
             m_audioThread.join();
         }
-        deleteFiles(); // clean tmp files TODO: maybe this is not needed
     }
 
 
@@ -364,10 +351,17 @@ public:
         switch_safe_free(jsonStr);
     }
 
-    void writeText(const char* text) { //TODO: IMPORTANT adjust this function cause  sending text makes OpenAI refuse and close websocket 
+    void writeText(const char* text) { 
         if(!this->isConnected()) return;
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "sending text: %s\n", text); // TODO: remove debug 
-        // webSocket.sendUtf8Text(ix::IXWebSocketSendData(text, strlen(text)));
+        cJSON *json = cJSON_Parse(text);
+        if (!json) {
+            const char* error = cJSON_GetErrorPtr();
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "cJSON_Parse failed: %s\n", error ? error : "unknown error");
+            return;
+        } // sending only if parsable json
+
+        webSocket.sendUtf8Text(ix::IXWebSocketSendData(text, strlen(text)));
+        cJSON_Delete(json);
     }
 
     void deleteFiles() {
@@ -394,7 +388,6 @@ private:
     bool m_audioThreadRunning = true;
 
     void processAudioQueue() {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "[GUARD GUARD GUARD] (%s) AudioStreamer thread started\n", m_sessionId.c_str());
         while (m_audioThreadRunning) {
             std::string fileToPlay;
             int duration_ms = 0;
@@ -414,16 +407,14 @@ private:
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "(%s) session not found for audio playback\n", m_sessionId.c_str());
                 return;
             } 
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) playing audio file: %s for %d ms\n", m_sessionId.c_str(), fileToPlay.c_str(), duration_ms); //TODO: remove debug
 
             switch_ivr_displace_session(session, fileToPlay.c_str(), 0, "m");
             //sleep for audio duration
             std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) finished playing audio file: %s\n", m_sessionId.c_str(), fileToPlay.c_str()); //TODO: remove debug
             switch_core_session_rwunlock(session);
             // may stop displace session
         }
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "[GUARD GUARD GUARD] (%s) AudioStreamer thread stopped\n", m_sessionId.c_str());
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "(%s) AudioStreamer thread stopped\n", m_sessionId.c_str());
     }
 };
 
@@ -714,7 +705,6 @@ extern "C" {
         }
 
         extra_headers = switch_channel_get_variable(channel, "STREAM_EXTRA_HEADERS");
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "[GUARD] extra headers: %s channel: %s\n", extra_headers ? extra_headers : "NULL", switch_channel_get_uuid(channel)); //TODO: remove
 
         // allocate per-session tech_pvt
         auto* tech_pvt = (private_t *) switch_core_session_alloc(session, sizeof(private_t));

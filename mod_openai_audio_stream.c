@@ -228,7 +228,6 @@ SWITCH_STANDARD_API(stream_function)
                     snprintf(headers_buf, sizeof(headers_buf),
                              "{\"Authorization\": \"Bearer %s\", \"OpenAI-Beta\": \"realtime=v1\"}", apikey);
                     switch_channel_set_variable(channel, "STREAM_EXTRA_HEADERS", headers_buf);
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(lsession), SWITCH_LOG_DEBUG, "[GUARD] setting extra headers: %s channel: %s\n", headers_buf, switch_channel_get_uuid(channel)); //TODO: remove
                 }
 
                 if (!validate_ws_uri(argv[2], &wsUri[0])) {
