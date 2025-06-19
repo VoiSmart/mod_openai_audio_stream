@@ -45,6 +45,12 @@ static switch_bool_t capture_callback(switch_media_bug_t *bug, void *user_data, 
             }
             return stream_frame(bug);
             break;
+        case SWITCH_ABC_TYPE_WRITE_REPLACE: //This is where the mediabug will write audio data to the channel
+            if (tech_pvt->close_requested) { //TODO: maybe default
+                return SWITCH_FALSE;
+            }
+            write_frame(session, bug);
+            break;
 
         case SWITCH_ABC_TYPE_WRITE:
         default:
@@ -199,6 +205,7 @@ SWITCH_STANDARD_API(stream_function)
                     switch_core_session_rwunlock(lsession);
                     goto done;
                 }
+                flags |= SMBF_WRITE_REPLACE;
                 if (0 == strcmp(argv[3], "mixed")) {
                     flags |= SMBF_WRITE_STREAM;
                 } else if (0 == strcmp(argv[3], "stereo")) {
