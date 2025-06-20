@@ -135,18 +135,12 @@ public:
             }
         });
 
-        m_audioThreadRunning = true;
-        m_audioThread = std::thread(&AudioStreamer::processAudioQueue, this);
-
         int err = 0;
-        resampler = speex_resampler_init(1, inSampleRate, outSampleRate, 5, &err);
+        m_resampler = speex_resampler_init(1, in_sample_rate, out_sample_rate, 5, &err);
 
         // Now that our callback is setup, we can start our background thread and receive messages
         webSocket.start();
     }
-
-    void setPlaybackBuffer(switch_buffer_t *buffer) { playback_buffer = buffer; }
-    void setPlaybackMutex(switch_mutex_t *mutex) { playback_mutex = mutex; }
 
     switch_media_bug_t *get_media_bug(switch_core_session_t *session) {
         switch_channel_t *channel = switch_core_session_get_channel(session);
@@ -220,28 +214,28 @@ public:
         }
     }
 
-    std::vector<int16_t> resampleRawAudio(const std::string& inputRaw) {
+    std::vector<int16_t> resampleRawAudio(const std::string& input_raw) {
 
-        size_t inSamples = inputRaw.size() / 2;
-        size_t outSamples = static_cast<size_t>(inSamples * outSampleRate / static_cast<float>(inSampleRate)) + 1;
+        size_t in_samples = input_raw.size() / 2;
+        size_t out_samples = static_cast<size_t>(in_samples * out_sample_rate / static_cast<float>(in_sample_rate)) + 1;
 
-        std::vector<int16_t> inBuffer(inSamples);
-        std::vector<int16_t> outBuffer(outSamples);
+        std::vector<int16_t> in_buffer(in_samples);
+        std::vector<int16_t> out_buffer(out_samples);
 
-        std::memcpy(inBuffer.data(), inputRaw.data(), inputRaw.size());
+        std::memcpy(in_buffer.data(), input_raw.data(), input_raw.size());
 
-        spx_uint32_t in_len = inSamples;
-        spx_uint32_t out_len = outSamples;
+        spx_uint32_t in_len = in_samples;
+        spx_uint32_t out_len = out_samples;
 
-        int err = speex_resampler_process_int(resampler, 0, inBuffer.data(), &in_len, outBuffer.data(), &out_len);
+        int err = speex_resampler_process_int(m_resampler, 0, in_buffer.data(), &in_len, out_buffer.data(), &out_len);
 
         if (err != RESAMPLER_ERR_SUCCESS) {
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Resampling failed with error code: %d\n", err);
             return std::vector<int16_t>(); // return empty vector on error
         }
 
-        outBuffer.resize(out_len);  // resize to actual size used
-        return outBuffer;
+        out_buffer.resize(out_len);  // resize to actual size used
+        return out_buffer;
     }
 
     std::string createWavFromRaw(std::string rawAudio) {
@@ -320,27 +314,9 @@ public:
                     m_Files.insert(filePath);
                     jsonFile = cJSON_CreateString(filePath);
                     cJSON_AddItemToObject(json, "file", jsonFile); 
-                    int duration_ms = static_cast<int>((rawAudio.size() * 1000) / (24000 * 2));
-                    //m_audioQueue.push({filePath, duration_ms});
-                    //m_audioCv.notify_one(); // notify audio thread to process the queue TODO: maybe this is not needed
-                    //
-                    
-                    auto resampled = resampleRawAudio(rawAudio); //TODO: safe code, refactor
-                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "response.audio.delta (%s) resampled size: %zu samples\n",
-                                      m_sessionId.c_str(), resampled.size());
-                    const int16_t *pcm16_data = resampled.data();
 
-                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "response.audio.delta Writing to buffer %p", (void*)playback_buffer);
-
-                    switch_mutex_lock(playback_mutex);
-                    auto used = switch_buffer_write(playback_buffer, pcm16_data, resampled.size() * sizeof(int16_t));
-                    switch_mutex_unlock(playback_mutex);
-                    //buffer len 
-                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "response.audio.delta (%s) playback_buffer size: %zu bytes\n",
-                                      m_sessionId.c_str(), switch_buffer_inuse(playback_buffer));
-                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "response.audio.delta (%s) playback_buffer used: %zu bytes\n",
-                                      m_sessionId.c_str(), used);
-
+                    auto resampled = resampleRawAudio(rawAudio); 
+                    push_audio_queue(resampled);
 
                 }
                 if(jsonFile) {
@@ -359,14 +335,35 @@ public:
         return status;
     }
 
+    // managing queue, crashing if popping or peeking an empty queue
+    // TODO: raise a custom exception instead of crashing
+    
+    bool is_audio_queue_empty() {
+        std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
+        return m_audio_queue.empty();
+    }
+
+    void push_audio_queue(const std::vector<int16_t>& audio_data) {
+        std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
+        m_audio_queue.push(audio_data);
+    }
+
+    std::vector<int16_t> pop_audio_queue() {
+        std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
+        auto audio_data = m_audio_queue.front();
+        m_audio_queue.pop();
+        return audio_data;
+    }
+
+    std::vector<int16_t> peek_audio_queue() {
+        std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
+        return m_audio_queue.front();
+    }
+
     ~AudioStreamer() {
-        {
-            std::lock_guard<std::mutex> lock(m_audioMutex);
-            m_audioThreadRunning = false;
-        }
-        m_audioCv.notify_one();
-        if (m_audioThread.joinable()) {
-            m_audioThread.join();
+        if (m_resampler) {
+            speex_resampler_destroy(m_resampler);
+            m_resampler = nullptr;
         }
     }
 
@@ -430,47 +427,11 @@ private:
     int m_playFile;
     std::unordered_set<std::string> m_Files;
 
-    switch_buffer_t *playback_buffer;
-    switch_mutex_t *playback_mutex;
-    int inSampleRate = 24000;
-    int outSampleRate = 16000;
-    SpeexResamplerState *resampler = nullptr; 
-
-    std::queue<std::pair<std::string, int>> m_audioQueue;
-    std::mutex m_audioMutex;
-    std::condition_variable m_audioCv;
-    std::thread m_audioThread;
-    bool m_audioThreadRunning = true;
-
-    void processAudioQueue() {
-        while (m_audioThreadRunning) {
-            std::string fileToPlay;
-            int duration_ms = 0;
-            {
-                std::unique_lock<std::mutex> lock(m_audioMutex);
-                m_audioCv.wait(lock, [this]() {return !m_audioQueue.empty() || !m_audioThreadRunning; }); //TODO: maybe this is not needed
-                if (!m_audioThreadRunning) return;
-                if (m_audioQueue.empty()) continue; 
-                auto [filePath, dur] = m_audioQueue.front();
-                fileToPlay = filePath;
-                duration_ms = dur;
-                m_audioQueue.pop();
-            }
-
-            switch_core_session_t* session = switch_core_session_locate(m_sessionId.c_str()); // TODO: check if we have to do this every time
-            if (!session) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "(%s) session not found for audio playback\n", m_sessionId.c_str());
-                return;
-            } 
-
-            switch_ivr_displace_session(session, fileToPlay.c_str(), 0, "m");
-            //sleep for audio duration
-            std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
-            switch_core_session_rwunlock(session);
-            // may stop displace session
-        }
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "(%s) AudioStreamer thread stopped\n", m_sessionId.c_str());
-    }
+    int in_sample_rate = 24000; //OpenAI default sample rate
+    int out_sample_rate = 16000; // output sample rate
+    SpeexResamplerState *m_resampler = nullptr; 
+    std::queue<std::vector<int16_t>> m_audio_queue;
+    std::mutex m_audio_queue_mutex;
 };
 
 
@@ -517,9 +478,6 @@ namespace {
             auto* as = new AudioStreamer(tech_pvt->sessionId, wsUri, responseHandler, deflate, heart_beat,
                                             suppressLog, extra_headers, no_reconnect,
                                             tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation);
-
-            as->setPlaybackBuffer(tech_pvt->playback_buffer);
-            as->setPlaybackMutex(tech_pvt->playback_mutex);
 
             tech_pvt->pAudioStreamer = static_cast<void *>(as);
 
@@ -920,33 +878,31 @@ extern "C" {
             return SWITCH_TRUE;
         }
 
-        //TODO: dynamically calculate the size
+        // push a chunk in the audio buffer used treated as cache
+        if (switch_buffer_inuse(tech_pvt->playback_buffer) == 0 && !as->is_audio_queue_empty()) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "write_frame: pushing audio chunk to playback buffer\n");
+            auto chunk = as->pop_audio_queue();
+            switch_buffer_write(tech_pvt->playback_buffer, chunk.data(), chunk.size() * sizeof(int16_t));
+        }
+
         uint32_t bytes_needed = 640;  // per 20ms @ 16kHz PCM16
         if (bytes_needed > frame->buflen) { //TODO: defensive may be useless 
             bytes_needed = frame->buflen;  
         }
 
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Reading from buffer %p", (void*)tech_pvt->playback_buffer);
-
-        switch_mutex_lock(tech_pvt->playback_mutex);
         uint32_t available = switch_buffer_inuse(tech_pvt->playback_buffer);
         switch_byte_t *data = (switch_byte_t *) frame->data;
-
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG,
-        "(%s) write_frame: writing %u bytes (available: %u) frame buflen: %u datalen: %u samples: %u)\n",
-        tech_pvt->sessionId, bytes_needed, available, (uint32_t)frame->buflen, frame->datalen, frame->samples);
 
         if (available >= bytes_needed) {
             switch_buffer_read(tech_pvt->playback_buffer, data, bytes_needed);
         } else if (available > 0) {
             switch_buffer_read(tech_pvt->playback_buffer, data, available);
             memset(data + available, 0, bytes_needed - available);
-        } else {
+        } else { //TODO: may just leave it untouched if silence 
             memset(data, 0, bytes_needed);
         }
         frame->datalen = bytes_needed;
         frame->samples = bytes_needed / 2;
-        switch_mutex_unlock(tech_pvt->playback_mutex);
 
         return SWITCH_TRUE;
     }
