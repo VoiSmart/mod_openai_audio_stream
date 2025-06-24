@@ -46,7 +46,7 @@ static switch_bool_t capture_callback(switch_media_bug_t *bug, void *user_data, 
             return stream_frame(bug);
             break;
         case SWITCH_ABC_TYPE_WRITE_REPLACE: //This is where the mediabug will write audio data to the channel
-            if (tech_pvt->close_requested) { //TODO: maybe default
+            if (tech_pvt->close_requested) { 
                 return SWITCH_FALSE;
             }
             write_frame(session, bug);
@@ -145,10 +145,10 @@ static switch_status_t send_text(switch_core_session_t *session, char* text) {
     return status;
 }
 
-#define STREAM_API_SYNTAX "<uuid> [start | stop | send_text | pause | resume | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000 | 24000] [metadata] [openaikey]"
+#define STREAM_API_SYNTAX "<uuid> [start | stop | send_text | pause | resume | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000 | 24000] [metadata]"
 SWITCH_STANDARD_API(stream_function)
 {
-    char *mycmd = NULL, *argv[7] = { 0 };
+    char *mycmd = NULL, *argv[6] = { 0 };
     int argc = 0;
 
     switch_status_t status = SWITCH_STATUS_FALSE;
@@ -222,19 +222,11 @@ SWITCH_STANDARD_API(stream_function)
                         sampling = 16000;
                     } else if (0 == strcmp(argv[4], "8k")) {
                         sampling = 8000;
+                    } else if (0 == strcmp(argv[4], "24k")) {
+                        sampling = 24000;
                     } else {
                         sampling = atoi(argv[4]);
                     }
-                }
-
-                // TODO: manage api key with channel variable
-                switch_channel_t *channel = switch_core_session_get_channel(lsession); //TODO: check if we have a valid channel maybe? should always be located
-                char *apikey = argc > 6 ? argv[6] : NULL;
-                if (apikey) {
-                    char headers_buf[512] = {0};
-                    snprintf(headers_buf, sizeof(headers_buf),
-                             "{\"Authorization\": \"Bearer %s\", \"OpenAI-Beta\": \"realtime=v1\"}", apikey);
-                    switch_channel_set_variable(channel, "STREAM_EXTRA_HEADERS", headers_buf);
                 }
 
                 if (!validate_ws_uri(argv[2], &wsUri[0])) {
