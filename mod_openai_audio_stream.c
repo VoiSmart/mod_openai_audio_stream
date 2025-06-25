@@ -63,15 +63,12 @@ static switch_bool_t capture_callback(switch_media_bug_t *bug, void *user_data, 
 static switch_status_t start_capture(switch_core_session_t *session,
                                      switch_media_bug_flag_t flags,
                                      char* wsUri,
-                                     int sampling,
-                                     char* metadata)
+                                     int sampling)
 {
     switch_channel_t *channel = switch_core_session_get_channel(session);
     switch_media_bug_t *bug;
     switch_status_t status;
     switch_codec_t* read_codec;
-
-    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "[GUARD] entering start_capture\n");
 
     void *pUserData = NULL;
     int channels = (flags & SMBF_STEREO) ? 2 : 1;
@@ -90,7 +87,7 @@ static switch_status_t start_capture(switch_core_session_t *session,
 
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "calling stream_session_init.\n");
     if (SWITCH_STATUS_FALSE == stream_session_init(session, responseHandler, read_codec->implementation->actual_samples_per_second,
-                                                 wsUri, sampling, channels, metadata, &pUserData)) {
+                                                 wsUri, sampling, channels, &pUserData)) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Error initializing mod_openai_audio_stream session.\n");
         return SWITCH_STATUS_FALSE;
     }
@@ -145,14 +142,13 @@ static switch_status_t send_text(switch_core_session_t *session, char* text) {
     return status;
 }
 
-#define STREAM_API_SYNTAX "<uuid> [start | stop | send_text | pause | resume | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000 | 24000] [metadata]"
+#define STREAM_API_SYNTAX "<uuid> [start | stop | send_text | pause | resume | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000 | 24000]"
 SWITCH_STANDARD_API(stream_function)
 {
     char *mycmd = NULL, *argv[6] = { 0 };
     int argc = 0;
 
     switch_status_t status = SWITCH_STATUS_FALSE;
-    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "[GUARD] mod_openai_audio_stream API called\n");
 
     if (!zstr(cmd) && (mycmd = strdup(cmd))) {
         argc = switch_separate_string(mycmd, ' ', argv, (sizeof(argv) / sizeof(argv[0])));
@@ -198,13 +194,6 @@ SWITCH_STANDARD_API(stream_function)
                 char wsUri[MAX_WS_URI];
                 int sampling = 8000;
                 switch_media_bug_flag_t flags = SMBF_READ_STREAM;
-                char *metadata = argc > 5 ? argv[5] : NULL;
-                if(metadata && (is_valid_utf8(argv[2]) != SWITCH_STATUS_SUCCESS)) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-                                      "%s contains invalid utf8 characters\n", argv[2]);
-                    switch_core_session_rwunlock(lsession);
-                    goto done;
-                }
                 flags |= SMBF_WRITE_REPLACE;
                 if (0 == strcmp(argv[3], "mixed")) {
                     flags |= SMBF_WRITE_STREAM;
@@ -236,7 +225,7 @@ SWITCH_STANDARD_API(stream_function)
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                       "invalid sample rate: %s\n", argv[4]);
                 } else {
-                    status = start_capture(lsession, flags, wsUri, sampling, metadata);
+                    status = start_capture(lsession, flags, wsUri, sampling);
                 }
             } else {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
@@ -280,7 +269,6 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_openai_audio_stream_load)
         return SWITCH_STATUS_TERM;
     }
     SWITCH_ADD_API(api_interface, "uuid_openai_audio_stream", "audio_stream API", stream_function, STREAM_API_SYNTAX);
-    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid start wss-url metadata");
     switch_console_set_complete("add uuid_opeani_audio_stream ::console::list_uuid start wss-url");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid stop");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid pause");

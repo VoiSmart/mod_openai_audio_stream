@@ -20,7 +20,7 @@ public:
     AudioStreamer(const char* uuid, const char* wsUri, responseHandler_t callback, int deflate, int heart_beat,
                     bool suppressLog, const char* extra_headers, bool no_reconnect,
                     const char* tls_cafile, const char* tls_keyfile, const char* tls_certfile,
-                    bool tls_disable_hostname_validation): m_sessionId(uuid), m_notify(callback),
+                    bool tls_disable_hostname_validation, uint32_t session_samping): m_sessionId(uuid), m_notify(callback),
                     m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0){
 
         ix::WebSocketHttpHeaders headers;
@@ -137,6 +137,7 @@ public:
 
         int err = 0;
         m_resampler = speex_resampler_init(1, in_sample_rate, out_sample_rate, 5, &err);
+        out_sample_rate = session_samping; 
 
         // Now that our callback is setup, we can start our background thread and receive messages
         webSocket.start();
@@ -160,24 +161,11 @@ public:
         }
     }
 
-    inline void send_initial_metadata(switch_core_session_t *session) {
-        auto *bug = get_media_bug(session);
-        if(bug) {
-            auto* tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
-            if(tech_pvt && strlen(tech_pvt->initialMetadata) > 0) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG,
-                                          "sending initial metadata %s\n", tech_pvt->initialMetadata);
-                writeText(tech_pvt->initialMetadata);
-            }
-        }
-    }
-
     void eventCallback(notifyEvent_t event, const char* message) {
         switch_core_session_t* psession = switch_core_session_locate(m_sessionId.c_str());
         if(psession) {
             switch (event) {
                 case CONNECT_SUCCESS:
-                    // send_initial_metadata(psession); //TODO: sending first session update here
                     m_notify(psession, EVENT_CONNECT, message);
                     break;
                 case CONNECTION_DROPPED:
@@ -304,7 +292,7 @@ public:
                     }
                     switch_snprintf(filePath, 256, "%s%s%s_%d.tmp%s", SWITCH_GLOBAL_dirs.temp_dir,
                                     SWITCH_PATH_SEPARATOR, m_sessionId.c_str(), m_playFile++, fileType.c_str());
-                    std::ofstream fstream(filePath, std::ofstream::binary);
+                    std::ofstream fstream(filePath, std::ofstream::binary); //only for debugging, remove later
                     std::string wavData = createWavFromRaw(rawAudio);
                     fstream.write(wavData.data(), wavData.size());
                     //std:size_t size = static_cast<std::size_t>(fstream.tellp()); // Used?
@@ -436,7 +424,7 @@ private:
 namespace {
 
         switch_status_t stream_data_init(private_t *tech_pvt, switch_core_session_t *session, char *wsUri,
-                                         uint32_t sampling, int desiredSampling, int channels, char *metadata, responseHandler_t responseHandler,
+                                         uint32_t sampling, int desiredSampling, int channels, responseHandler_t responseHandler,
                                          int deflate, int heart_beat, bool suppressLog, int rtp_packets, const char* extra_headers,
                                          bool no_reconnect, const char *tls_cafile, const char *tls_keyfile,
                                          const char *tls_certfile, bool tls_disable_hostname_validation)
@@ -454,8 +442,6 @@ namespace {
             tech_pvt->rtp_packets = rtp_packets;
             tech_pvt->channels = channels;
             tech_pvt->audio_paused = 0;
-
-            if (metadata) strncpy(tech_pvt->initialMetadata, metadata, MAX_METADATA_LEN);
 
             //size_t buflen = (FRAME_SIZE_8000 * desiredSampling / 8000 * channels * 1000 / RTP_PERIOD * BUFFERED_SEC);
             const size_t buflen = (FRAME_SIZE_8000 * desiredSampling / 8000 * channels * rtp_packets);
@@ -475,7 +461,7 @@ namespace {
 
             auto* as = new AudioStreamer(tech_pvt->sessionId, wsUri, responseHandler, deflate, heart_beat,
                                             suppressLog, extra_headers, no_reconnect,
-                                            tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation);
+                                            tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, sampling); //TODO: find a way to extract channel sampling rate here
 
             tech_pvt->pAudioStreamer = static_cast<void *>(as);
 
@@ -676,7 +662,6 @@ extern "C" {
                                         char *wsUri,
                                         int sampling,
                                         int channels,
-                                        char* metadata,
                                         void **ppUserData)
     {
         int deflate, heart_beat;
@@ -761,7 +746,7 @@ extern "C" {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "error allocating memory!\n");
             return SWITCH_STATUS_FALSE;
         }
-        if (SWITCH_STATUS_SUCCESS != stream_data_init(tech_pvt, session, wsUri, samples_per_second, sampling, channels, metadata, responseHandler, deflate, heart_beat,
+        if (SWITCH_STATUS_SUCCESS != stream_data_init(tech_pvt, session, wsUri, samples_per_second, sampling, channels, responseHandler, deflate, heart_beat,
                                                         suppressLog, rtp_packets, extra_headers, no_reconnect, tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation)) {
             destroy_tech_pvt(tech_pvt);
             return SWITCH_STATUS_FALSE;

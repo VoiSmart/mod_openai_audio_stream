@@ -9,7 +9,6 @@
 #define MY_BUG_NAME "audio_stream"
 #define MAX_SESSION_ID (256)
 #define MAX_WS_URI (4096)
-#define MAX_METADATA_LEN (8192)
 
 #define EVENT_CONNECT           "mod_openai_audio_stream::connect"
 #define EVENT_DISCONNECT        "mod_openai_audio_stream::disconnect"
@@ -30,7 +29,6 @@ struct private_data {
     int channels;
     int audio_paused:1;
     int close_requested:1;
-    char initialMetadata[8192];
     RingBuffer *buffer;
     switch_buffer_t *sbuffer;
     uint8_t *data;
