@@ -20,8 +20,9 @@ public:
     AudioStreamer(const char* uuid, const char* wsUri, responseHandler_t callback, int deflate, int heart_beat,
                     bool suppressLog, const char* extra_headers, bool no_reconnect,
                     const char* tls_cafile, const char* tls_keyfile, const char* tls_certfile,
-                    bool tls_disable_hostname_validation, uint32_t session_samping): m_sessionId(uuid), m_notify(callback),
-                    m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0){
+                    bool tls_disable_hostname_validation, uint32_t session_samping, 
+                    switch_mutex_t *playback_mutex, switch_buffer_t *playback_buffer): m_sessionId(uuid), m_notify(callback), 
+        m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0){
 
         ix::WebSocketHttpHeaders headers;
         ix::SocketTLSOptions tlsOptions;
@@ -139,6 +140,13 @@ public:
         m_resampler = speex_resampler_init(1, in_sample_rate, out_sample_rate, 5, &err);
         out_sample_rate = session_samping; 
 
+        if (playback_buffer == nullptr || playback_mutex == nullptr) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "AudioStreamer: playback buffer or mutex is null\n");
+            throw std::runtime_error("AudioStreamer: playback buffer or mutex is null");
+        }
+        m_playback_buffer = playback_buffer; 
+        m_playback_mutex = playback_mutex;
+
         // Now that our callback is setup, we can start our background thread and receive messages
         webSocket.start();
     }
@@ -185,16 +193,12 @@ public:
                         m_notify(psession, EVENT_JSON, msg.c_str());
                     }
 
-                    if (strstr(msg.c_str(), "Missing bearer") != NULL) {
+                    if (strstr(msg.c_str(), "Missing bearer") != NULL) { //TODO:remove
                         eventCallback(CONNECT_ERROR, "Missing Bearer, cloud not connect to realtime openai service.\n");
                     }
-                    if(!m_suppress_log)
-                        if (strstr(msg.c_str(), "response.audio.delta") != NULL ||
-                           strstr(msg.c_str(), "streamAudio") != NULL) {
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(psession), SWITCH_LOG_DEBUG, "response: audio delta\n", msg.c_str()); 
-                        } else {
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(psession), SWITCH_LOG_DEBUG, "response: %s\n", msg.c_str());
-                        }
+                    if (!m_suppress_log) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(psession), SWITCH_LOG_DEBUG, "Received message: %s\n", msg.c_str());
+                    }
                     break;
             }
             switch_core_session_rwunlock(psession);
@@ -269,13 +273,27 @@ public:
         if (!json) {
             return status;
         }
+
         const char* jsType = cJSON_GetObjectCstr(json, "type");
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "processMessage: type: %s\n", jsType ? jsType : "null");
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "processMessage type: %s\n", jsType ? jsType : "null");
+
         if(jsType && strstr(jsType, "error")) { 
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - error: %s\n", m_sessionId.c_str(), message.c_str());
-        }
-        if(jsType && strcmp(jsType, "response.audio.delta") == 0) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta\n", m_sessionId.c_str());
+            status = SWITCH_TRUE;
+
+        } else if(jsType && strcmp(jsType, "input_audio_buffer.speech_started") == 0) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - speech started\n", m_sessionId.c_str());
+            clear_audio_queue();
+            // also clear the private_t playback buffer used in write frame
+            switch_mutex_lock(m_playback_mutex);
+            switch_buffer_zero(m_playback_buffer);
+            switch_mutex_unlock(m_playback_mutex);
+
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - speech detected stopping audio playback\n", m_sessionId.c_str());
+
+            status = SWITCH_TRUE;
+
+        } else if(jsType && strcmp(jsType, "response.audio.delta") == 0) {
             const char* jsonAudio = cJSON_GetObjectCstr(json, "delta");
             if(jsonAudio) {
                 cJSON* jsonFile = nullptr;
@@ -313,11 +331,10 @@ public:
                     free(jsonString);
                     status = SWITCH_TRUE;
                 }
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - response.audio.delta DONE\n", m_sessionId.c_str());
-             } else {
+            } else {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - response.audio.delta no audio data\n", m_sessionId.c_str());
             }
-        } // else manage diff message type from openai
+        } 
         cJSON_Delete(json);
         return status;
     }
@@ -344,6 +361,13 @@ public:
     std::vector<int16_t> peek_audio_queue() {
         std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
         return m_audio_queue.front();
+    }
+
+    void clear_audio_queue() {
+        std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
+        while (!m_audio_queue.empty()) {
+            m_audio_queue.pop();
+        }
     }
 
     ~AudioStreamer() {
@@ -383,7 +407,7 @@ public:
         switch_safe_free(jsonStr);
     }
 
-    void writeText(const char* text) { 
+    void writeText(const char* text) {  // Openai only accepts json not utf8 plain text
         if(!this->isConnected()) return;
         cJSON *json = cJSON_Parse(text);
         if (!json) {
@@ -404,6 +428,14 @@ public:
         }
     }
 
+    int get_in_sample_rate() const {
+        return in_sample_rate;
+    }
+
+    int get_out_sample_rate() const {
+        return out_sample_rate;
+    }
+
 private:
     std::string m_sessionId;
     responseHandler_t m_notify;
@@ -418,6 +450,9 @@ private:
     SpeexResamplerState *m_resampler = nullptr; 
     std::queue<std::vector<int16_t>> m_audio_queue;
     std::mutex m_audio_queue_mutex;
+
+    switch_buffer_t *m_playback_buffer; // a copy of the playback buffer used in media bug private_t in case some managements is needed
+    switch_mutex_t *m_playback_mutex;
 };
 
 
@@ -447,21 +482,21 @@ namespace {
             const size_t buflen = (FRAME_SIZE_8000 * desiredSampling / 8000 * channels * rtp_packets);
             const size_t playback_buflen = 128000; // 128Kb may need to be decreased 
 
-            if (switch_buffer_create(pool, &tech_pvt->playback_buffer, playback_buflen) != SWITCH_STATUS_SUCCESS) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-                                  "%s: Error creating playback buffer.\n", tech_pvt->sessionId);
-                return SWITCH_STATUS_FALSE;
-            }
-
             if (switch_mutex_init(&tech_pvt->playback_mutex, SWITCH_MUTEX_NESTED, pool) != SWITCH_STATUS_SUCCESS) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                   "%s: Error creating playback mutex.\n", tech_pvt->sessionId);
                 return SWITCH_STATUS_FALSE;
             }
 
+            if (switch_buffer_create(pool, &tech_pvt->playback_buffer, playback_buflen) != SWITCH_STATUS_SUCCESS) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                                  "%s: Error creating playback buffer.\n", tech_pvt->sessionId);
+                return SWITCH_STATUS_FALSE;
+            }
+
             auto* as = new AudioStreamer(tech_pvt->sessionId, wsUri, responseHandler, deflate, heart_beat,
                                             suppressLog, extra_headers, no_reconnect,
-                                            tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, sampling); //TODO: find a way to extract channel sampling rate here
+                                            tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, sampling, tech_pvt->playback_mutex, tech_pvt->playback_buffer); //TODO: find a way to extract channel sampling rate here
 
             tech_pvt->pAudioStreamer = static_cast<void *>(as);
 
@@ -889,7 +924,8 @@ extern "C" {
             switch_buffer_write(tech_pvt->playback_buffer, chunk.data(), chunk.size() * sizeof(int16_t));
         }
 
-        uint32_t bytes_needed = 640;  // per 20ms @ 16kHz PCM16
+        //uint32_t bytes_needed = 20 * as->get_out_sample_rate() / 1000;  // per 20ms @ 16kHz PCM16 MONO
+        uint32_t bytes_needed = 640;
         if (bytes_needed > frame->buflen) { // may be useless
             bytes_needed = frame->buflen;  
         }
