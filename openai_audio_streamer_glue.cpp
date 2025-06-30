@@ -230,10 +230,9 @@ public:
     }
 
     std::string createWavFromRaw(std::string rawAudio) {
-        const int sampleRate = 24000; // OpenAI response Default sr
         const int numChannels = 1; // mono
         const int bitsPerSample = 16; // pcm16
-        int byteRate = sampleRate * numChannels * bitsPerSample / 8;
+        int byteRate = in_sample_rate * numChannels * bitsPerSample / 8;
         int blockAlign = numChannels * bitsPerSample / 8;
         uint32_t dataSize = rawAudio.size();
         uint32_t chunkSize = 36 + dataSize;
@@ -253,7 +252,7 @@ public:
         uint16_t audioFormat = 1; // 1 is pcm
         wavStream.write(reinterpret_cast<const char*>(&audioFormat), 2);
         wavStream.write(reinterpret_cast<const char*>(&numChannels), 2);
-        wavStream.write(reinterpret_cast<const char*>(&sampleRate), 4);
+        wavStream.write(reinterpret_cast<const char*>(&in_sample_rate), 4);
         wavStream.write(reinterpret_cast<const char*>(&byteRate), 4);
         wavStream.write(reinterpret_cast<const char*>(&blockAlign), 2);
         wavStream.write(reinterpret_cast<const char*>(&bitsPerSample), 2);
@@ -275,7 +274,9 @@ public:
         }
 
         const char* jsType = cJSON_GetObjectCstr(json, "type");
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "processMessage type: %s\n", jsType ? jsType : "null");
+        if (!m_suppress_log) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "processMessage type: %s\n", jsType ? jsType : "null");
+        }
 
         if(jsType && strstr(jsType, "error")) { 
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - error: %s\n", m_sessionId.c_str(), message.c_str());
@@ -913,36 +914,40 @@ extern "C" {
 
         AudioStreamer *as = static_cast<AudioStreamer *>(tech_pvt->pAudioStreamer);
         switch_frame_t *frame = switch_core_media_bug_get_write_replace_frame(bug);
-        if (!frame) {
+        auto codec = switch_core_session_get_write_codec(session);  
+        if (!frame || !codec || !codec->implementation) {
             return SWITCH_TRUE;
         }
 
+        // TODO: calculate before one for all
+        uint32_t bytes_per_sample = codec->implementation->decoded_bytes_per_packet / codec->implementation->samples_per_packet;
+        uint32_t samples_per_20ms = codec->implementation->samples_per_second / 50;
+        uint32_t bytes_needed = samples_per_20ms * bytes_per_sample;
+
+        if (bytes_needed > frame->buflen) { // may be useless
+            bytes_needed = frame->buflen;  
+        }
+        
+        uint32_t available = switch_buffer_inuse(tech_pvt->playback_buffer);
+
         // push a chunk in the audio buffer used treated as cache
-        if (switch_buffer_inuse(tech_pvt->playback_buffer) == 0 && !as->is_audio_queue_empty()) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "write_frame: pushing audio chunk to playback buffer\n");
+        if (available < bytes_needed && !as->is_audio_queue_empty()) {
             auto chunk = as->pop_audio_queue();
             switch_buffer_write(tech_pvt->playback_buffer, chunk.data(), chunk.size() * sizeof(int16_t));
         }
 
-        //uint32_t bytes_needed = 20 * as->get_out_sample_rate() / 1000;  // per 20ms @ 16kHz PCM16 MONO
-        uint32_t bytes_needed = 640;
-        if (bytes_needed > frame->buflen) { // may be useless
-            bytes_needed = frame->buflen;  
-        }
-
-        uint32_t available = switch_buffer_inuse(tech_pvt->playback_buffer);
         switch_byte_t *data = (switch_byte_t *) frame->data;
 
-        if (available >= bytes_needed) {
+        if (available > bytes_needed) {
             switch_buffer_read(tech_pvt->playback_buffer, data, bytes_needed);
-        } else if (available > 0) {
-            switch_buffer_read(tech_pvt->playback_buffer, data, available);
-            memset(data + available, 0, bytes_needed - available);
         } else { 
-            memset(data, 0, bytes_needed);
+            switch_buffer_read(tech_pvt->playback_buffer, data, available);
         }
-        frame->datalen = bytes_needed;
-        frame->samples = bytes_needed / 2;
+
+        frame->datalen = available > bytes_needed ? bytes_needed : available;
+        frame->samples = frame->datalen / bytes_per_sample;
+
+        switch_core_media_bug_set_write_replace_frame(bug, frame);
 
         return SWITCH_TRUE;
     }
