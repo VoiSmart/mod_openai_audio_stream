@@ -269,7 +269,7 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_openai_audio_stream_load)
         return SWITCH_STATUS_TERM;
     }
     SWITCH_ADD_API(api_interface, "uuid_openai_audio_stream", "audio_stream API", stream_function, STREAM_API_SYNTAX);
-    switch_console_set_complete("add uuid_opeani_audio_stream ::console::list_uuid start wss-url");
+    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid start wss-url");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid stop");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid pause");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid resume");
