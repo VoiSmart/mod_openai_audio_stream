@@ -137,8 +137,8 @@ public:
         });
 
         int err = 0;
-        m_resampler = speex_resampler_init(1, in_sample_rate, out_sample_rate, 5, &err);
         out_sample_rate = session_samping; 
+        m_resampler = speex_resampler_init(1, in_sample_rate, out_sample_rate, 5, &err);
 
         if (playback_buffer == nullptr || playback_mutex == nullptr) {
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "AudioStreamer: playback buffer or mutex is null\n");
@@ -388,7 +388,6 @@ public:
         return (webSocket.getReadyState() == ix::ReadyState::Open);
     }
 
-    // This is where we should send Base-64 encoded binary data to the server
     void writeBinary(uint8_t* buffer, size_t len) {
         if(!this->isConnected()) return;
         // Convert the buffer to PCM16 and then base64 encode it.
@@ -396,7 +395,6 @@ public:
         std::string base64Audio = base64_encode(buffer, len, false);
         if (base64Audio.empty()) return;
 
-        // Prepare the JSON message
         cJSON *root = cJSON_CreateObject();
         cJSON_AddStringToObject(root, "type", "input_audio_buffer.append");
         cJSON_AddStringToObject(root, "audio", base64Audio.c_str());
@@ -446,8 +444,8 @@ private:
     int m_playFile;
     std::unordered_set<std::string> m_Files;
 
-    int in_sample_rate = 24000; //OpenAI default sample rate
-    int out_sample_rate = 16000; // output sample rate
+    int in_sample_rate = 24000; //OpenAI sample rate
+    int out_sample_rate = 16000; // output default sample rate
     SpeexResamplerState *m_resampler = nullptr; 
     std::queue<std::vector<int16_t>> m_audio_queue;
     std::mutex m_audio_queue_mutex;
@@ -479,7 +477,6 @@ namespace {
             tech_pvt->channels = channels;
             tech_pvt->audio_paused = 0;
 
-            //size_t buflen = (FRAME_SIZE_8000 * desiredSampling / 8000 * channels * 1000 / RTP_PERIOD * BUFFERED_SEC);
             const size_t buflen = (FRAME_SIZE_8000 * desiredSampling / 8000 * channels * rtp_packets);
             const size_t playback_buflen = 128000; // 128Kb may need to be decreased 
 
@@ -497,7 +494,7 @@ namespace {
 
             auto* as = new AudioStreamer(tech_pvt->sessionId, wsUri, responseHandler, deflate, heart_beat,
                                             suppressLog, extra_headers, no_reconnect,
-                                            tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, sampling, tech_pvt->playback_mutex, tech_pvt->playback_buffer); //TODO: find a way to extract channel sampling rate here
+                                            tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, sampling, tech_pvt->playback_mutex, tech_pvt->playback_buffer); 
 
             tech_pvt->pAudioStreamer = static_cast<void *>(as);
 
