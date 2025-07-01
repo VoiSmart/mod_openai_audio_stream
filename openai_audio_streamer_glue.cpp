@@ -408,15 +408,7 @@ public:
 
     void writeText(const char* text) {  // Openai only accepts json not utf8 plain text
         if(!this->isConnected()) return;
-        cJSON *json = cJSON_Parse(text);
-        if (!json) {
-            const char* error = cJSON_GetErrorPtr();
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "cJSON_Parse failed: %s\n", error ? error : "unknown error");
-            return;
-        } // sending only if parsable json
-
         webSocket.sendUtf8Text(ix::IXWebSocketSendData(text, strlen(text)));
-        cJSON_Delete(json);
     }
 
     void deleteFiles() {
