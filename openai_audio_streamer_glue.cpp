@@ -719,8 +719,8 @@ extern "C" {
         tls_cafile = switch_channel_get_variable(channel, "STREAM_TLS_CA_FILE");
         tls_keyfile = switch_channel_get_variable(channel, "STREAM_TLS_KEY_FILE");
         tls_certfile = switch_channel_get_variable(channel, "STREAM_TLS_CERT_FILE");
-        openai_api_key = switch_channel_get_variable(channel, "OPENAI_API_KEY"); 
-        openai_realtime_version = switch_channel_get_variable(channel, "OPENAI_REALTIME_VERSION");
+        openai_api_key = switch_channel_get_variable(channel, "STREAM_OPENAI_API_KEY"); 
+        openai_realtime_version = switch_channel_get_variable(channel, "STREAM_OPENAI_REALTIME_VERSION");
 
 
         if (switch_channel_var_true(channel, "STREAM_TLS_DISABLE_HOSTNAME_VALIDATION")) {
