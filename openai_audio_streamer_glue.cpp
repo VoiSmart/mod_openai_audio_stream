@@ -637,18 +637,32 @@ extern "C" {
         return SWITCH_STATUS_SUCCESS;
     }
 
-    switch_status_t stream_session_send_text(switch_core_session_t *session, char* text) {
+    switch_status_t stream_session_send_json(switch_core_session_t *session, char* json) {
         switch_channel_t *channel = switch_core_session_get_channel(session);
         auto *bug = (switch_media_bug_t*) switch_channel_get_private(channel, MY_BUG_NAME);
         if (!bug) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_text failed because no bug\n");
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_json failed because no bug\n");
+            return SWITCH_STATUS_FALSE;
+        } else if (!json || strlen(json) == 0) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_json failed because json is empty\n");
             return SWITCH_STATUS_FALSE;
         }
+
+        cJSON *json_tosend = cJSON_Parse(json);
+        if (!json_tosend) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_json failed because json is not a valid json: %s\n", json);
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "OpenAI only accepts frames in JSON format.\n");
+            return SWITCH_STATUS_FALSE;
+        }
+
+        // check if the json is a valid json 
+
         auto *tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
 
         if (!tech_pvt) return SWITCH_STATUS_FALSE;
         auto *pAudioStreamer = static_cast<AudioStreamer *>(tech_pvt->pAudioStreamer);
-        if (pAudioStreamer && text) pAudioStreamer->writeText(text);
+        if (pAudioStreamer && json_tosend) pAudioStreamer->writeText(json_tosend->valuestring);
+        cJSON_Delete(json_tosend);
 
         return SWITCH_STATUS_SUCCESS;
     }
@@ -960,7 +974,7 @@ extern "C" {
             auto* audioStreamer = (AudioStreamer *) tech_pvt->pAudioStreamer;
             if(audioStreamer) {
                 audioStreamer->deleteFiles();
-                if (text) audioStreamer->writeText(text);
+                stream_session_send_json(session, text);
                 finish(tech_pvt);
             }
 

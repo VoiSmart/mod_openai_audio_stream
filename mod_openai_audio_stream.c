@@ -102,17 +102,17 @@ static switch_status_t start_capture(switch_core_session_t *session,
     return SWITCH_STATUS_SUCCESS;
 }
 
-static switch_status_t do_stop(switch_core_session_t *session, char* text)
+static switch_status_t do_stop(switch_core_session_t *session, char* json)
 {
     switch_status_t status = SWITCH_STATUS_SUCCESS;
 
-    if (text) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "mod_openai_audio_stream: stop w/ final text %s\n", text);
+    if (json) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "mod_openai_audio_stream: stop w/ final json %s\n", json);
     }
     else {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "mod_openai_audio_stream: stop\n");
     }
-    status = stream_session_cleanup(session, text, 0);
+    status = stream_session_cleanup(session, json, 0);
 
     return status;
 }
@@ -127,22 +127,22 @@ static switch_status_t do_pauseresume(switch_core_session_t *session, int pause)
     return status;
 }
 
-static switch_status_t send_text(switch_core_session_t *session, char* text) {
+static switch_status_t send_json(switch_core_session_t *session, char* json) {
     switch_status_t status = SWITCH_STATUS_FALSE;
     switch_channel_t *channel = switch_core_session_get_channel(session);
     switch_media_bug_t *bug = switch_channel_get_private(channel, MY_BUG_NAME);
 
     if (bug) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "mod_openai_audio_stream: sending text: %s.\n", text);
-        status = stream_session_send_text(session, text);
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "mod_openai_audio_stream: sending json: %s\n", json);
+        status = stream_session_send_json(session, json);
     }
     else {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "mod_openai_audio_stream: no bug, failed sending text: %s.\n", text);
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "mod_openai_audio_stream: no bug, failed sending json: %s.\n", json);
     }
     return status;
 }
 
-#define STREAM_API_SYNTAX "<uuid> [start | stop | send_text | pause | resume | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000 | 24000]"
+#define STREAM_API_SYNTAX "<uuid> [start | stop | send_json | pause | resume | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000 | 24000]"
 SWITCH_STANDARD_API(stream_function)
 {
     char *mycmd = NULL, *argv[6] = { 0 };
@@ -175,20 +175,31 @@ SWITCH_STANDARD_API(stream_function)
                 status = do_pauseresume(lsession, 1);
             } else if (!strcasecmp(argv[1], "resume")) {
                 status = do_pauseresume(lsession, 0);
-            } else if (!strcasecmp(argv[1], "send_text")) {
+            } else if (!strcasecmp(argv[1], "send_json")) {
                 if (argc < 3) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-                                      "send_text requires an argument specifying text to send\n");
+                                      "send_json requires an argument specifying json to send\n");
                     switch_core_session_rwunlock(lsession);
                     goto done;
                 }
-                if(is_valid_utf8(argv[2]) != SWITCH_STATUS_SUCCESS) {
+                // All of the following code face the blackspace issue trimming the json when there are spaces (basically treating the api like there is a long mulitude of arguments based on spaces)
+                char* json = strstr(cmd, "send_json") + strlen("send_json");
+                while (*json == ' ') {
+                    json++;
+                    if (!*json) { //TODO: check if usefull this should never happen
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                                          "send_json requires an argument specifying json to send\n");
+                        switch_core_session_rwunlock(lsession);
+                        goto done;
+                    }
+                }
+                if(is_valid_utf8(json) != SWITCH_STATUS_SUCCESS) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                       "%s contains invalid utf8 characters\n", argv[2]);
                     switch_core_session_rwunlock(lsession);
                     goto done;
                 }
-                status = send_text(lsession, argv[2]);
+                status = send_json(lsession, json);
             } else if (!strcasecmp(argv[1], "start")) {
                 //switch_channel_t *channel = switch_core_session_get_channel(lsession);
                 char wsUri[MAX_WS_URI];
@@ -273,7 +284,7 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_openai_audio_stream_load)
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid stop");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid pause");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid resume");
-    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid send_text");
+    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid send_json");
 
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "mod_openai_audio_stream API successfully loaded\n");
 
