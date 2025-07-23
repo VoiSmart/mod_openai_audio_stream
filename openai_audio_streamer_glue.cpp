@@ -637,35 +637,72 @@ extern "C" {
         return SWITCH_STATUS_SUCCESS;
     }
 
-    switch_status_t stream_session_send_json(switch_core_session_t *session, char* json) {
+    
+    switch_status_t stream_session_send_json(switch_core_session_t *session, const char* base64_input) {
         switch_channel_t *channel = switch_core_session_get_channel(session);
-        auto *bug = (switch_media_bug_t*) switch_channel_get_private(channel, MY_BUG_NAME);
+        switch_media_bug_t *bug = (switch_media_bug_t*) switch_channel_get_private(channel, MY_BUG_NAME);
+        cJSON *json_obj = nullptr;
+        char *json_unformatted = nullptr;
+        switch_status_t status = SWITCH_STATUS_FALSE;
         if (!bug) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_json failed because no bug\n");
-            return SWITCH_STATUS_FALSE;
-        } else if (!json || strlen(json) == 0) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_json failed because json is empty\n");
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_json failed: no media bug found.\n");
             return SWITCH_STATUS_FALSE;
         }
-
-        cJSON *json_tosend = cJSON_Parse(json);
-        if (!json_tosend) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_json failed because json is not a valid json: %s\n", json);
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "OpenAI only accepts frames in JSON format.\n");
-            return SWITCH_STATUS_FALSE;
-        }
-
-        // check if the json is a valid json 
 
         auto *tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
+        if (!tech_pvt) { 
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_json failed to retrieve session data.\n");
+            return SWITCH_STATUS_FALSE;
+        }
+        AudioStreamer *pAudioStreamer = static_cast<AudioStreamer *>(tech_pvt->pAudioStreamer);
+        if (!pAudioStreamer) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_json failed: AudioStreamer websocket is null.\n");
+            return SWITCH_STATUS_FALSE;
+        }
 
-        if (!tech_pvt) return SWITCH_STATUS_FALSE;
-        auto *pAudioStreamer = static_cast<AudioStreamer *>(tech_pvt->pAudioStreamer);
-        if (pAudioStreamer && json_tosend) pAudioStreamer->writeText(json_tosend->valuestring);
-        cJSON_Delete(json_tosend);
+        if (!base64_input || strlen(base64_input) == 0) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_json failed: input is empty.\n");
+            return SWITCH_STATUS_FALSE;
+        }
+        std::string decoded_str;
+        try {
+            decoded_str = base64_decode(base64_input, false);
+        } catch (const std::exception& e) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                              "stream_session_send_json failed: base64 decode error: %s\n", e.what());
+            return SWITCH_STATUS_FALSE;
+        }
+        if (decoded_str.empty()) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_json base64 decode failed.\n");
+            return SWITCH_STATUS_FALSE;
+        }
 
-        return SWITCH_STATUS_SUCCESS;
+        json_obj = cJSON_Parse(decoded_str.c_str());
+        if (!json_obj) {
+            const char* err = cJSON_GetErrorPtr();
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                              "stream_session_send_json failed: invalid JSON. Error near: %s\n",
+                              err ? err : "unknown");
+            return SWITCH_STATUS_FALSE;
+        }
+
+        json_unformatted = cJSON_PrintUnformatted(json_obj);
+        if (!json_unformatted) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                              "stream_session_send_json failed: cJSON_PrintUnformatted returned null\n");
+            return SWITCH_STATUS_FALSE;
+        }
+
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG,
+                          "stream_session_send_json: sending JSON: %s\n", json_unformatted); 
+        pAudioStreamer->writeText(json_unformatted);
+        status = SWITCH_STATUS_SUCCESS;
+
+        if (json_unformatted) free(json_unformatted);
+        if (json_obj) cJSON_Delete(json_obj);
+        return status;
     }
+
 
     switch_status_t stream_session_pauseresume(switch_core_session_t *session, int pause) {
         switch_channel_t *channel = switch_core_session_get_channel(session);
