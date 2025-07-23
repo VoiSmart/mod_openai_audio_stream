@@ -3,6 +3,7 @@
  */
 #include "mod_openai_audio_stream.h"
 #include "openai_audio_streamer_glue.h"
+#include <strings.h>
 
 SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_openai_audio_stream_shutdown);
 SWITCH_MODULE_RUNTIME_FUNCTION(mod_openai_audio_stream_runtime);
@@ -133,11 +134,10 @@ static switch_status_t send_json(switch_core_session_t *session, char* json) {
     switch_media_bug_t *bug = switch_channel_get_private(channel, MY_BUG_NAME);
 
     if (bug) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "mod_openai_audio_stream: sending json: %s\n", json);
         status = stream_session_send_json(session, json);
     }
     else {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "mod_openai_audio_stream: no bug, failed sending json: %s.\n", json);
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "mod_openai_audio_stream: no bug, failed sending json\n");
     }
     return status;
 }
@@ -154,13 +154,15 @@ SWITCH_STANDARD_API(stream_function)
         argc = switch_separate_string(mycmd, ' ', argv, (sizeof(argv) / sizeof(argv[0])));
     }
     assert(cmd);
-    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "mod_openai_audio_stream cmd: %s\n", cmd ? cmd : "");
 
     if (zstr(cmd) || argc < 2 || (0 == strcmp(argv[1], "start") && argc < 4)) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Error with command %s %s %s.\n", cmd, argv[0], argv[1]);
         stream->write_function(stream, "-USAGE: %s\n", STREAM_API_SYNTAX);
         goto done;
     } else {
+        if (strcasecmp(argv[1], "send_json")) { 
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "mod_openai_audio_stream cmd: %s\n", cmd ? cmd : "");
+        }
         switch_core_session_t *lsession = NULL;
         if ((lsession = switch_core_session_locate(argv[0]))) {
             if (!strcasecmp(argv[1], "stop")) {
@@ -182,24 +184,7 @@ SWITCH_STANDARD_API(stream_function)
                     switch_core_session_rwunlock(lsession);
                     goto done;
                 }
-                // All of the following code face the blackspace issue trimming the json when there are spaces (basically treating the api like there is a long mulitude of arguments based on spaces)
-                char* json = strstr(cmd, "send_json") + strlen("send_json");
-                while (*json == ' ') {
-                    json++;
-                    if (!*json) { //TODO: check if usefull this should never happen
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-                                          "send_json requires an argument specifying json to send\n");
-                        switch_core_session_rwunlock(lsession);
-                        goto done;
-                    }
-                }
-                if(is_valid_utf8(json) != SWITCH_STATUS_SUCCESS) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-                                      "%s contains invalid utf8 characters\n", argv[2]);
-                    switch_core_session_rwunlock(lsession);
-                    goto done;
-                }
-                status = send_json(lsession, json);
+                status = send_json(lsession, argv[2]);
             } else if (!strcasecmp(argv[1], "start")) {
                 //switch_channel_t *channel = switch_core_session_get_channel(lsession);
                 char wsUri[MAX_WS_URI];
