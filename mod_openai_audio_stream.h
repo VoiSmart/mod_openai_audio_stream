@@ -1,20 +1,20 @@
-#ifndef MOD_AUDIO_STREAM_H
-#define MOD_AUDIO_STREAM_H
+#ifndef MOD_OPENAI_AUDIO_STREAM_H
+#define MOD_OPENAI_AUDIO_STREAM_H
 
 #include <switch.h>
+#include <limits.h>
 #include <speex/speex_resampler.h>
 #include "buffer/ringbuffer.h"
 
 #define MY_BUG_NAME "audio_stream"
 #define MAX_SESSION_ID (256)
 #define MAX_WS_URI (4096)
-#define MAX_METADATA_LEN (8192)
 
-#define EVENT_CONNECT           "mod_audio_stream::connect"
-#define EVENT_DISCONNECT        "mod_audio_stream::disconnect"
-#define EVENT_ERROR             "mod_audio_stream::error"
-#define EVENT_JSON              "mod_audio_stream::json"
-#define EVENT_PLAY              "mod_audio_stream::play"
+#define EVENT_CONNECT           "mod_openai_audio_stream::connect"
+#define EVENT_DISCONNECT        "mod_openai_audio_stream::disconnect"
+#define EVENT_ERROR             "mod_openai_audio_stream::error"
+#define EVENT_JSON              "mod_openai_audio_stream::json"
+#define EVENT_PLAY              "mod_openai_audio_stream::play"
 
 typedef void (*responseHandler_t)(switch_core_session_t* session, const char* eventName, const char* json);
 
@@ -29,11 +29,12 @@ struct private_data {
     int channels;
     int audio_paused:1;
     int close_requested:1;
-    char initialMetadata[8192];
     RingBuffer *buffer;
     switch_buffer_t *sbuffer;
     uint8_t *data;
     int rtp_packets;
+    switch_buffer_t *playback_buffer;
+    switch_mutex_t *playback_mutex;
 };
 
 typedef struct private_data private_t;
@@ -45,4 +46,4 @@ enum notifyEvent_t {
     MESSAGE
 };
 
-#endif //MOD_AUDIO_STREAM_H
+#endif //MOD_OPENAI_AUDIO_STREAM_H

@@ -1,26 +1,9 @@
-# mod_audio_stream
+# mod_openai_audio_stream
 
-A FreeSWITCH module that streams L16 audio from a channel to a websocket endpoint. If websocket sends back responses (eg. JSON) it can be effectively used with ASR engines such as IBM Watson etc., or any other purpose you find applicable.
+A fork of [mod_openai_audio_stream](https://github.com/amigniter/mod_audio_stream) specifically designed for streaming audio to OpenAI's realtime API and playing the responses back to the user via FreeSWITCH and WebSocket.
+**mod_openai_audio_stream** is a FreeSWITCH module that streams L16 audio from a channel to an OpenAI realtime websocket endpoint. The stream is adherent to OpenAI's Realtime API specification and allows for real-time audio playback directly in the channel.
 
-### Update (22/2/2025)
-
-#### :rocket: **Introducing Bi-Directional Streaming with automatic playback**
-
-A new version `mod-audio-stream v1.0.2` has been published, featuring **raw binary stream** from the websocket.
-It can be downloaded from the **Releases** section (pre-release) and comes as a pre-built Debian 12 package.
-
-- Playback feature allows continuous forward streaming while the playback runs independently.
-- It is a **full-duplex streamer** between the caller and the websocket.
-- It supports **base64 encoded audio** as well as the **raw binary stream** from the websocket.
-- Playback can be **tracked, paused, or resumed** dynamically.
-
-:small_blue_diamond: This release is a commercial product that is available for **free use**, including commercial use, with a limitation of **10 concurrent streaming channels**. For users requiring more than 10 channels, or access to the source code, please [contact us](mailto:amsoftswitch@gmail.com)
- for further information and licensing options.
-
-### About
-
-- The purpose of `mod_audio_stream` was to make a simple, less dependent but yet effective module to stream audio and receive responses from websocket server. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), c++ library for websocket protocol which is compiled as a static library.
-- This module was inspired by mod_audio_fork.
+- The purpose of `mod_openai_audio_stream` was to make a simple, less dependent but yet effective module to stream audio and receive responses directly from OpenAI realtime websocket into the call via switch. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), c++ library for websocket protocol which is compiled as a static library.
 
 ## Installation
 
@@ -49,18 +32,8 @@ cpack -G DEB
 ```
 Debian package will be placed in root directory `_packages` folder.
 
-## Scripted Build & Installation
-
-```
-sudo apt-get -y install git \
-    && cd /usr/src/ \
-    && git clone https://github.com/amigniter/mod_audio_stream.git \
-    && cd mod_audio_stream \
-    && sudo bash ./build-mod-audio-stream.sh
-```
-
 ### Channel variables
-The following channel variables can be used to fine tune websocket connection and also configure mod_audio_stream logging:
+The following channel variables can be used to fine tune websocket connection and also configure mod_openai_audio_stream logging:
 
 | Variable                               | Description                                             | Default |
 | -------------------------------------- | ------------------------------------------------------- | ------- |
@@ -74,12 +47,15 @@ The following channel variables can be used to fine tune websocket connection an
 | STREAM_TLS_KEY_FILE                    | optional client key for WSS connections                 | none    |
 | STREAM_TLS_CERT_FILE                   | optional client cert for WSS connections                | none    |
 | STREAM_TLS_DISABLE_HOSTNAME_VALIDATION | true or 1 disable hostname check in WSS connections     | false   |
+| STREAM_OPENAI_API_KEY                  | OpenAI API key, used for authentication with OpenAI's   | none    |
+| STREAM_OPENAI_REALTIME_VERSION         | OpenAI Realtime API version, e.g. "v1"                  | v1      |
 
 - Per message deflate compression option is enabled by default. It can lead to a very nice bandwidth savings. To disable it set the channel var to `true|1`.
 - Heart beat, sent every xx seconds when there is no traffic to make sure that load balancers do not kill an idle connection.
 - Suppress parameter is omitted by default(false). All the responses from websocket server will be printed to the log. Not to flood the log you can suppress it by setting the value to `true|1`. Events are fired still, it only affects printing to the log.
 - `Buffer Size` actually represents a duration of audio chunk sent to websocket. If you want to send e.g. 100ms audio packets to your ws endpoint
 you would set this variable to 100. If ommited, default packet size of 20ms will be sent as grabbed from the audio channel (which is default FreeSWITCH frame size)
+- Set `STREAM_OPENAI_API_KEY` to have a valid OpenAI API key to authenticate with OpenAI's Realtime API. This is required for the module to function properly. If not set the module will use the `STREAM_EXTRA_HEADERS` to pass the OpenAI API key as a header assuming you prepared the headers in the channel variable. **NOTE**: An OpenAI API key is required for the module to function properly. If not set, the module will not be able to connect to the API.
 - Extra headers should be a JSON object with key-value pairs representing additional HTTP headers. Each key should be a header name, and its corresponding value should be a string.
   ```json
   {
@@ -102,7 +78,7 @@ Defaults to `false`, which enforces hostname match with the peer certificate.
 The freeswitch module exposes the following API commands:
 
 ```
-uuid_audio_stream <uuid> start <wss-url> <mix-type> <sampling-rate> <metadata>
+uuid_openai_audio_stream <uuid> start <wss-url> <mix-type> <sampling-rate> 
 ```
 Attaches a media bug and starts streaming audio (in L16 format) to the websocket server. FS default is 8k. If sampling-rate is other than 8k it will be resampled.
 - `uuid` - Freeswitch channel unique id
@@ -114,46 +90,45 @@ Attaches a media bug and starts streaming audio (in L16 format) to the websocket
 - `sampling-rate` - choice of
   - "8k" = 8000 Hz sample rate will be generated
   - "16k" = 16000 Hz sample rate will be generated
-- `metadata` - (optional) a valid `utf-8` text to send. It will be sent the first before audio streaming starts.
+  - "24k" = 24000 Hz sample rate will be generated
 
 ```
-uuid_audio_stream <uuid> send_text <metadata>
+uuid_openai_audio_stream <uuid> send_json
 ```
-Sends a text to the websocket server. Requires a valid `utf-8` text.
+Sends a json object **base64 encoded** to the OpenAI websocket endpoint. Requires a valid `base64` text and a valid json compliant to the OpenAI Realtime API specification. The reason for base64 encoding is that spaces, new lines and other special characters in the json object can cause issues with the freeswitch API command parsing.
 
 ```
-uuid_audio_stream <uuid> stop <metadata>
+uuid_openai_audio_stream <uuid> stop 
 ```
-Stops audio stream and closes websocket connection. If _metadata_ is provided it will be sent before the connection is closed.
 
 ```
-uuid_audio_stream <uuid> pause
+uuid_openai_audio_stream <uuid> pause
 ```
 Pauses audio stream
 
 ```
-uuid_audio_stream <uuid> resume
+uuid_openai_audio_stream <uuid> resume
 ```
 Resumes audio stream
 
 ## Events
 Module will generate the following event types:
-- `mod_audio_stream::json`
-- `mod_audio_stream::connect`
-- `mod_audio_stream::disconnect`
-- `mod_audio_stream::error`
-- `mod_audio_stream::play`
+- `mod_openai_audio_stream::json`
+- `mod_openai_audio_stream::connect`
+- `mod_openai_audio_stream::disconnect`
+- `mod_openai_audio_stream::error`
+- `mod_openai_audio_stream::play`
 
 ### response
 Message received from websocket endpoint. Json expected, but it contains whatever the websocket server's response is.
 #### Freeswitch event generated
-**Name**: mod_audio_stream::json
+**Name**: mod_openai_audio_stream::json
 **Body**: WebSocket server response
 
 ### connect
 Successfully connected to websocket server.
 #### Freeswitch event generated
-**Name**: mod_audio_stream::connect
+**Name**: mod_openai_audio_stream::connect
 **Body**: JSON
 ```json
 {
@@ -164,7 +139,7 @@ Successfully connected to websocket server.
 ### disconnect
 Disconnected from websocket server.
 #### Freeswitch event generated
-**Name**: mod_audio_stream::disconnect
+**Name**: mod_openai_audio_stream::disconnect
 **Body**: JSON
 ```json
 {
@@ -181,7 +156,7 @@ Disconnected from websocket server.
 ### error
 There is an error with the connection. Multiple fields will be available on the event to describe the error.
 #### Freeswitch event generated
-**Name**: mod_audio_stream::error
+**Name**: mod_openai_audio_stream::error
 **Body**: JSON
 ```json
 {
@@ -197,30 +172,28 @@ There is an error with the connection. Multiple fields will be available on the 
 - retries: `<int>`, error: `<string>`, wait_time: `<int>`, http_status: `<int>`
 
 ### play
-**Name**: mod_audio_stream::play
-**Body**: JSON
-
-Websocket server may return JSON object containing base64 encoded audio to be played by the user. To use this feature, response must follow the format:
+The audio playback is handled by the module.
+OpenAI return JSON object containing base64 encoded audio to be played by the user. 
+The audio delta response may include other fields, but not so important for the audio playback.
 ```json
 {
-  "type": "streamAudio",
-  "data": {
-    "audioDataType": "raw",
-    "sampleRate": 8000,
-    "audioData": "base64 encoded audio"
-  }
+  ...
+  "type": "response.audio.delta",
+  "delta": "BASE64_ENCODED_AUDIO...",
+  ...
 }
 ```
-- audioDataType: `<raw|wav|mp3|ogg>`
 
-Event generated by the module (subclass: _mod_audio_stream::play_) will be the same as the `data` element with the **file** added to it representing filePath:
+Event generated by the module (subclass: _mod_openai_audio_stream::play_) will be the same as the `data` element with the **file** added to it representing filePath:
+
+This module will still generate audio files in the temp as `mod_audio_stream` does, every file will be wav and automatically resampled to the channel's sampling rate.
+Can be useful for debugging purposes or other use cases. We are planning to introduce a flag to disable/enable this feature in the future.
 ```json
 {
-  "audioDataType": "raw",
-  "sampleRate": 8000,
   "file": "/path/to/the/file"
 }
+
 ```
 If printing to the log is not suppressed, `response` printed to the console will look the same as the event. The original response containing base64 encoded audio is replaced because it can be quite huge.
 
-All the files generated by this feature will reside at the temp directory and will be deleted when the session is closed.
+the files generated by this feature will reside at the temp directory and will be deleted when the session is closed.
