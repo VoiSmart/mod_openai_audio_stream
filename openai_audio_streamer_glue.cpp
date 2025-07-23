@@ -20,7 +20,7 @@ public:
     AudioStreamer(const char* uuid, const char* wsUri, responseHandler_t callback, int deflate, int heart_beat,
                     bool suppressLog, const char* extra_headers, bool no_reconnect,
                     const char* tls_cafile, const char* tls_keyfile, const char* tls_certfile,
-                    bool tls_disable_hostname_validation, uint32_t session_samping): m_sessionId(uuid), m_notify(callback), 
+                    bool tls_disable_hostname_validation, uint32_t session_sampling): m_sessionId(uuid), m_notify(callback), 
         m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0){
 
         ix::WebSocketHttpHeaders headers;
