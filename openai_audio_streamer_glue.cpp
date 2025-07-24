@@ -300,7 +300,7 @@ public:
                     std::string fileType = ".wav";
                     switch_snprintf(filePath, 256, "%s%s%s_%d.tmp%s", SWITCH_GLOBAL_dirs.temp_dir,
                                     SWITCH_PATH_SEPARATOR, m_sessionId.c_str(), m_playFile++, fileType.c_str());
-                    std::ofstream fstream(filePath, std::ofstream::binary); //only for debugging, remove later
+                    std::ofstream fstream(filePath, std::ofstream::binary); // For debugging purposes; can be disabled via the disable_audiofiles flag
                     std::string wavData = createWavFromRaw(rawAudio);
                     fstream.write(wavData.data(), wavData.size());
                     fstream.flush(); // flush buffer to os level write
