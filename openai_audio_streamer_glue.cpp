@@ -431,7 +431,7 @@ private:
     std::queue<std::vector<int16_t>> m_audio_queue;
     std::mutex m_audio_queue_mutex;
     bool playback_clear_requested = false; 
-    bool m_disable_audiofiles = false; // disable audio files save if true
+    bool m_disable_audiofiles = false; // disable saving audio files if true
 };
 
 
