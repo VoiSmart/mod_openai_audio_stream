@@ -1,14 +1,31 @@
-# mod_openai_audio_stream
+# Mod OpenAI Audio Stream
 
-A fork of [mod_openai_audio_stream](https://github.com/amigniter/mod_audio_stream) specifically designed for streaming audio to OpenAI's realtime API and playing the responses back to the user via FreeSWITCH and WebSocket.
-**mod_openai_audio_stream** is a FreeSWITCH module that streams L16 audio from a channel to an OpenAI realtime websocket endpoint. The stream is adherent to OpenAI's Realtime API specification and allows for real-time audio playback directly in the channel.
+A fork of [mod_audio_stream](https://github.com/amigniter/mod_audio_stream) specifically designed for streaming audio to OpenAI's realtime API and playing the responses back to the user via FreeSWITCH and WebSocket.
+**mod-openai-audio-stream** is a FreeSWITCH module that streams L16 audio from a channel to an OpenAI realtime websocket endpoint. The stream is adherent to OpenAI's Realtime API specification and allows for real-time audio playback directly in the channel.
 
-- The purpose of `mod_openai_audio_stream` was to make a simple, less dependent but yet effective module to stream audio and receive responses directly from OpenAI realtime websocket into the call via switch. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), c++ library for websocket protocol which is compiled as a static library.
+The purpose of **mod-openai-audio-stream** was to make a simple, less dependent but yet effective module to stream audio and receive responses directly from OpenAI realtime websocket into the call via switch. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), c++ library for websocket protocol which is compiled as a static library.
 
 ## Installation
 
 ### Dependencies
-It requires `libfreeswitch-dev`, `libssl-dev`, `zlib1g-dev` and `libspeexdsp-dev` on Debian/Ubuntu which are regular packages for Freeswitch installation.
+To build the module, make sure `FreeSWITCH development headers`, `OpenSSL`, `Zlib` and `SpeexDSP` development packages are installed on your system.
+
+Depending on your Linux distribution, you can install them like this:
+
+#### Debian / Ubuntu
+
+```bash
+sudo apt-get install -y libfreeswitch-dev libssl-dev zlib1g-dev libspeexdsp-dev
+```
+
+#### RHEL / Fedora / Rocky
+
+```bash
+sudo dnf install -y freeswitch-devel openssl-devel zlib-devel speexdsp-devel
+```
+
+For other distributions, please refer to your package manager documentation to install the equivalent packages.
+
 ### Building
 After cloning please execute: **git submodule init** and **git submodule update** to initialize the submodule.
 #### Custom path
@@ -25,15 +42,8 @@ sudo make install
 ```
 **TLS** is `OFF` by default. To build with TLS support add `-DUSE_TLS=ON` to cmake line.
 
-#### DEB Package
-To build DEB package after making the module:
-```
-cpack -G DEB
-```
-Debian package will be placed in root directory `_packages` folder.
-
 ### Channel variables
-The following channel variables can be used to fine tune websocket connection and also configure mod_openai_audio_stream logging:
+The following channel variables can be used to fine tune websocket connection and also configure mod-openai-audio-stream logging:
 
 | Variable                               | Description                                             | Default |
 | -------------------------------------- | ------------------------------------------------------- | ------- |
