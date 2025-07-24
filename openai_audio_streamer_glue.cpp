@@ -20,8 +20,8 @@ public:
     AudioStreamer(const char* uuid, const char* wsUri, responseHandler_t callback, int deflate, int heart_beat,
                     bool suppressLog, const char* extra_headers, bool no_reconnect,
                     const char* tls_cafile, const char* tls_keyfile, const char* tls_certfile,
-                    bool tls_disable_hostname_validation, uint32_t session_sampling): m_sessionId(uuid), m_notify(callback), 
-        m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0){
+                    bool tls_disable_hostname_validation, uint32_t session_sampling, bool disable_audiofiles): m_sessionId(uuid), m_notify(callback), 
+        m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0), m_disable_audiofiles(disable_audiofiles) {
 
         ix::WebSocketHttpHeaders headers;
         ix::SocketTLSOptions tlsOptions;
@@ -284,46 +284,45 @@ public:
         } else if(jsType && strcmp(jsType, "response.audio.delta") == 0) {
             const char* jsonAudio = cJSON_GetObjectCstr(json, "delta");
             playback_clear_requested = false;
-            if(jsonAudio) {
-                cJSON* jsonFile = nullptr;
-                std::string fileType = ".wav";
-                if(jsonAudio && !fileType.empty()) {
+            
+            if(jsonAudio && strlen(jsonAudio) > 0) {
+                std::string rawAudio;
+                try {
+                    rawAudio = base64_decode(jsonAudio);
+                } catch (const std::exception& e) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - base64 decode error: %s\n", m_sessionId.c_str(), e.what());
+                    cJSON_Delete(json);
+                    return status;
+                }
+
+                if (!m_disable_audiofiles) {
                     char filePath[256];
-                    std::string rawAudio;
-                    try {
-                        rawAudio = base64_decode(jsonAudio);
-                    } catch (const std::exception& e) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - base64 decode error: %s\n", m_sessionId.c_str(), e.what());
-                        cJSON_Delete(json);
-                        return status;
-                    }
+                    std::string fileType = ".wav";
                     switch_snprintf(filePath, 256, "%s%s%s_%d.tmp%s", SWITCH_GLOBAL_dirs.temp_dir,
                                     SWITCH_PATH_SEPARATOR, m_sessionId.c_str(), m_playFile++, fileType.c_str());
                     std::ofstream fstream(filePath, std::ofstream::binary); //only for debugging, remove later
                     std::string wavData = createWavFromRaw(rawAudio);
                     fstream.write(wavData.data(), wavData.size());
-                    //std:size_t size = static_cast<std::size_t>(fstream.tellp()); // Used?
                     fstream.flush(); // flush buffer to os level write
                     fstream.close();
                     m_Files.insert(filePath);
-                    jsonFile = cJSON_CreateString(filePath);
+                    cJSON* jsonFile = cJSON_CreateString(filePath);
                     cJSON_AddItemToObject(json, "file", jsonFile); 
 
-                    auto resampled = resampleRawAudio(rawAudio); 
-                    push_audio_queue(resampled);
-
-                }
-                if(jsonFile) {
                     char *jsonString = cJSON_PrintUnformatted(json);
                     m_notify(session, EVENT_PLAY, jsonString);
                     message.assign(jsonString);
                     free(jsonString);
-                    status = SWITCH_TRUE;
                 }
+
+                auto resampled = resampleRawAudio(rawAudio); 
+                push_audio_queue(resampled);
+                status = SWITCH_TRUE;
+
             } else {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - response.audio.delta no audio data\n", m_sessionId.c_str());
             }
-        } 
+        }
         cJSON_Delete(json);
         return status;
     }
@@ -432,6 +431,7 @@ private:
     std::queue<std::vector<int16_t>> m_audio_queue;
     std::mutex m_audio_queue_mutex;
     bool playback_clear_requested = false; 
+    bool m_disable_audiofiles = false; // disable audio files save if true
 };
 
 
@@ -441,7 +441,7 @@ namespace {
                                          uint32_t sampling, int desiredSampling, int channels, responseHandler_t responseHandler,
                                          int deflate, int heart_beat, bool suppressLog, int rtp_packets, const char* extra_headers,
                                          bool no_reconnect, const char *tls_cafile, const char *tls_keyfile,
-                                         const char *tls_certfile, bool tls_disable_hostname_validation)
+                                         const char *tls_certfile, bool tls_disable_hostname_validation, bool disable_audiofiles)
         {
             int err; //speex
 
@@ -474,7 +474,7 @@ namespace {
 
             auto* as = new AudioStreamer(tech_pvt->sessionId, wsUri, responseHandler, deflate, heart_beat,
                                             suppressLog, extra_headers, no_reconnect,
-                                            tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, sampling); 
+                                            tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, sampling, disable_audiofiles); 
 
             tech_pvt->pAudioStreamer = static_cast<void *>(as);
 
@@ -740,6 +740,7 @@ extern "C" {
         const char* openai_api_key = NULL;;
         const char* openai_realtime_version = NULL;
         bool tls_disable_hostname_validation = false;
+        bool disable_audiofiles = false;
 
         switch_channel_t *channel = switch_core_session_get_channel(session);
 
@@ -764,6 +765,10 @@ extern "C" {
 
         if (switch_channel_var_true(channel, "STREAM_TLS_DISABLE_HOSTNAME_VALIDATION")) {
             tls_disable_hostname_validation = true;
+        }
+        if (switch_channel_var_true(channel, "STREAM_DISABLE_AUDIOFILES")) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Audio files will not be saved.\n");
+            disable_audiofiles = true;
         }
 
         const char* heartBeat = switch_channel_get_variable(channel, "STREAM_HEART_BEAT");
@@ -811,7 +816,7 @@ extern "C" {
             return SWITCH_STATUS_FALSE;
         }
         if (SWITCH_STATUS_SUCCESS != stream_data_init(tech_pvt, session, wsUri, samples_per_second, sampling, channels, responseHandler, deflate, heart_beat,
-                                                        suppressLog, rtp_packets, extra_headers, no_reconnect, tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation)) {
+                                                        suppressLog, rtp_packets, extra_headers, no_reconnect, tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, disable_audiofiles)) {
             destroy_tech_pvt(tech_pvt);
             return SWITCH_STATUS_FALSE;
         }
