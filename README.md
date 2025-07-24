@@ -1,9 +1,9 @@
-# Mod OpenAI Audio Stream
+# mod_openai_audio_stream
 
 A fork of [mod_audio_stream](https://github.com/amigniter/mod_audio_stream) specifically designed for streaming audio to OpenAI's realtime API and playing the responses back to the user via FreeSWITCH and WebSocket.
-**mod-openai-audio-stream** is a FreeSWITCH module that streams L16 audio from a channel to an OpenAI realtime websocket endpoint. The stream is adherent to OpenAI's Realtime API specification and allows for real-time audio playback directly in the channel.
+**mod_openai_audio_stream** is a FreeSWITCH module that streams L16 audio from a channel to an OpenAI realtime websocket endpoint. The stream is adherent to OpenAI's Realtime API specification and allows for real-time audio playback directly in the channel.
 
-The purpose of **mod-openai-audio-stream** was to make a simple, less dependent but yet effective module to stream audio and receive responses directly from OpenAI realtime websocket into the call via switch. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), c++ library for websocket protocol which is compiled as a static library.
+The purpose of **mod_openai_audio_stream** was to make a simple, less dependent but yet effective module to stream audio and receive responses directly from OpenAI realtime websocket into the call via switch. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), c++ library for websocket protocol which is compiled as a static library.
 
 ## Notes 
 
@@ -48,7 +48,7 @@ sudo make install
 **TLS** is `OFF` by default. To build with TLS support add `-DUSE_TLS=ON` to cmake line.
 
 ### Channel variables
-The following channel variables can be used to fine tune websocket connection and also configure mod-openai-audio-stream logging:
+The following channel variables can be used to fine tune websocket connection and also configure mod_openai_audio_stream logging:
 
 | Variable                               | Description                                             | Default |
 | -------------------------------------- | ------------------------------------------------------- | ------- |
