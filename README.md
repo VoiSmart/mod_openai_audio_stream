@@ -72,6 +72,8 @@ The following channel variables can be used to fine tune websocket connection an
 - `Buffer Size` actually represents a duration of audio chunk sent to websocket. If you want to send e.g. 100ms audio packets to your ws endpoint
 you would set this variable to 100. If ommited, default packet size of 20ms will be sent as grabbed from the audio channel (which is default FreeSWITCH frame size)
 - Set `STREAM_OPENAI_API_KEY` to have a valid OpenAI API key to authenticate with OpenAI's Realtime API. This is required for the module to function properly. If not set the module will use the `STREAM_EXTRA_HEADERS` to pass the OpenAI API key as a header assuming you prepared the headers in the channel variable. **NOTE**: An OpenAI API key is required for the module to function properly. If not set, the module will not be able to connect to the API.
+- You can specify the OpenAI Realtime model in the URI, e.g. `uuid_openai_audio_stream ${uuid} start wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17 mono 24k`
+
 - Extra headers should be a JSON object with key-value pairs representing additional HTTP headers. Each key should be a header name, and its corresponding value should be a string.
   ```json
   {
@@ -107,6 +109,7 @@ Attaches a media bug and starts streaming audio (in L16 format) to the websocket
   - "8k" = 8000 Hz sample rate will be generated
   - "16k" = 16000 Hz sample rate will be generated
   - "24k" = 24000 Hz sample rate will be generated
+- **IMPORTANT NOTE**: The OpenAI Realtime API, when using PCM audio format, expects the audio to be in 24 kHz sample rate. Use the sampling-rate parameter as `24k` (or `24000`) and mono to ensure that the audio is sent in the correct format. From the OpenAI Realtime API documentation: *input audio must be 16-bit PCM at a 24kHz sample rate, single channel (mono), and little-endian byte order.* Support for exchanging audio with OpenAI in other formats may be developed in the future, which would make the `<sampling-rate>` and `<mono<` parameters useful for controlling the output format dynamically.
 
 ```
 uuid_openai_audio_stream <uuid> send_json
