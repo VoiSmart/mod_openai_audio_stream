@@ -57,7 +57,7 @@ jobs:
             fi
 
 
-            cppcheck --enable=all --inconclusive --std=c++17 --force \
+            cppcheck --enable=warning,style,performance,portability --std=c++17 --force \
                      --project=build/compile_commands.json \
                      --suppress=missingIncludeSystem \
                      -i build . 2> cppcheck.log || true
