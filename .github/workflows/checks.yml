@@ -54,3 +54,4 @@ jobs:
                      --project=build/compile_commands.json \
                      --suppress=missingIncludeSystem \
                      -i build . 2> cppcheck.log || true
+            cat cppcheck.log
