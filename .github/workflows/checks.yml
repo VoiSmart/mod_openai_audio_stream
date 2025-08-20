@@ -1,4 +1,4 @@
-name: Static Analysis
+name: Build & Static Checks
 
 on:
   push:

@@ -1,6 +1,6 @@
 # mod_openai_audio_stream
 
-![Static Analysis](https://github.com/dariopellegrino00/mod_openai_audio_stream/actions/workflows/static-analysis.yml/badge.svg)
+![Build & Static Code Checks](https://github.com/dariopellegrino00/mod_openai_audio_stream/actions/workflows/checks.yml/badge.svg)
 
 A fork of [mod_audio_stream](https://github.com/amigniter/mod_audio_stream) specifically designed for streaming audio to OpenAI's realtime API and playing the responses back to the user via FreeSWITCH and WebSocket.
 **mod_openai_audio_stream** is a FreeSWITCH module that streams L16 audio from a channel to an OpenAI realtime websocket endpoint. The stream is adherent to OpenAI's Realtime API specification and allows for real-time audio playback directly in the channel.
