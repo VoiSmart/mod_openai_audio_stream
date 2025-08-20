@@ -8,7 +8,6 @@ It is a fork of [mod_audio_stream](https://github.com/amigniter/mod_audio_stream
 
 The goal of **mod_openai_audio_stream** is to provide a simple, lightweight, yet effective module for streaming audio and receiving responses directly from OpenAI’s Realtime WebSocket into the call through FreeSWITCH. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), a C++ WebSocket library compiled as a static library.  
 
-The purpose of **mod_openai_audio_stream** was to make a simple, less dependent but yet effective module to stream audio and receive responses directly from OpenAI realtime websocket into the call via switch. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), c++ library for websocket protocol which is compiled as a static library.
 
 ## Notes 
 
