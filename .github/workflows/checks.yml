@@ -48,7 +48,8 @@ jobs:
             scan-build --status-bugs cmake --build build -j"$(nproc)"
 
             clang-tidy -p build $(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx') \
-              --warnings-as-errors='' || true
+              --warnings-as-errors='clang-analyzer-*,bugprone-*,performance-*'
+
 
             cppcheck --enable=all --inconclusive --std=c++17 --force \
                      --project=build/compile_commands.json \
