@@ -37,6 +37,7 @@ jobs:
           run: |
             set -eux
             cd /work
+            git config --global --add safe.directory /work
             cmake -S . -B build \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
