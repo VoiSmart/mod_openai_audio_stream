@@ -27,7 +27,6 @@ static switch_bool_t capture_callback(switch_media_bug_t *bug, void *user_data, 
 
     switch (type) {
         case SWITCH_ABC_TYPE_INIT:
-            const char *uuid = switch_core_session_get_uuid(session);
             break;
 
         case SWITCH_ABC_TYPE_CLOSE:
@@ -156,7 +155,7 @@ SWITCH_STANDARD_API(stream_function)
     assert(cmd);
 
     if (zstr(cmd) || argc < 2 || (0 == strcmp(argv[1], "start") && argc < 4)) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Error with command %s %s %s.\n", cmd, argv[0], argv[1]);
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Error with command %s.\n", cmd);
         stream->write_function(stream, "-USAGE: %s\n", STREAM_API_SYNTAX);
         goto done;
     } else {
