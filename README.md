@@ -1,9 +1,12 @@
 # mod_openai_audio_stream
 
-![Build & Static Code Checks](https://github.com/dariopellegrino00/mod_openai_audio_stream/actions/workflows/checks.yml/badge.svg)
+![Build & Static Code Checks](https://github.com/VoiSmart/mod_openai_audio_stream/actions/workflows/checks.yml/badge.svg)
 
-A fork of [mod_audio_stream](https://github.com/amigniter/mod_audio_stream) specifically designed for streaming audio to OpenAI's realtime API and playing the responses back to the user via FreeSWITCH and WebSocket.
-**mod_openai_audio_stream** is a FreeSWITCH module that streams L16 audio from a channel to an OpenAI realtime websocket endpoint. The stream is adherent to OpenAI's Realtime API specification and allows for real-time audio playback directly in the channel.
+**mod_openai_audio_stream** is a FreeSWITCH module that streams L16 audio from a channel to an OpenAI Realtime WebSocket endpoint. The stream follows OpenAI's Realtime API specification and enables real-time audio playback directly in the channel.  
+
+It is a fork of [mod_audio_stream](https://github.com/amigniter/mod_audio_stream), specifically adapted for streaming audio to OpenAI's Realtime API and playing the responses back to the user via FreeSWITCH and WebSocket.  
+
+The goal of **mod_openai_audio_stream** is to provide a simple, lightweight, yet effective module for streaming audio and receiving responses directly from OpenAI’s Realtime WebSocket into the call through FreeSWITCH. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), a C++ WebSocket library compiled as a static library.  
 
 The purpose of **mod_openai_audio_stream** was to make a simple, less dependent but yet effective module to stream audio and receive responses directly from OpenAI realtime websocket into the call via switch. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), c++ library for websocket protocol which is compiled as a static library.
 
