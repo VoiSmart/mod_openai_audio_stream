@@ -48,7 +48,13 @@ jobs:
             scan-build --status-bugs cmake --build build -j"$(nproc)"
 
             clang-tidy -p build $(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx') \
-              --warnings-as-errors='clang-analyzer-*,bugprone-*,performance-*'
+            FILES="$(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx')"
+            if [ -n "$FILES" ]; then
+              clang-tidy -p build $FILES \
+                --warnings-as-errors='clang-analyzer-*,bugprone-*,performance-*'
+            else
+              echo "No source files found for clang-tidy analysis."
+            fi
 
 
             cppcheck --enable=all --inconclusive --std=c++17 --force \
