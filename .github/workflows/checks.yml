@@ -48,7 +48,6 @@ jobs:
 
             scan-build --status-bugs cmake --build build -j"$(nproc)"
 
-            clang-tidy -p build $(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx') \
             FILES="$(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx')"
             if [ -n "$FILES" ]; then
               clang-tidy -p build $FILES \
