@@ -230,7 +230,10 @@ public:
         return out_buffer;
     }
 
-    std::string createWavFromRaw(std::string rawAudio) {
+    // create wav file from raw audio 
+    // rawAudio passed as constant reference because it is never edited
+    std::string createWavFromRaw(const std::string& rawAudio) {
+
         const int numChannels = 1; // mono
         const int bitsPerSample = 16; // pcm16
         int byteRate = in_sample_rate * numChannels * bitsPerSample / 8;
