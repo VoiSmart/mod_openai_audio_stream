@@ -60,12 +60,12 @@ jobs:
             cppcheck --enable=warning,performance,portability --std=c++17 --force \
                      --project=build/compile_commands.json \
                      --suppress=missingIncludeSystem \
-                     -i build -i buffer -i libs . 2> cppcheck-warn.log
+                     -i build -i buffer -i libs 2> cppcheck-warn.log
 
             cppcheck --enable=style --std=c++17 --force \
                      --project=build/compile_commands.json \
                      --suppress=missingIncludeSystem \
-                     -i build -i buffer -i libs . 2> cppcheck-style.log || true
+                     -i build -i buffer -i libs 2> cppcheck-style.log || true
 
             if [ -s cppcheck-style.log ]; then
               echo "Style issues found by cppcheck:"
