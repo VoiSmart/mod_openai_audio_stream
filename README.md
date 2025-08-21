@@ -1,6 +1,6 @@
 # mod_openai_audio_stream
 
-![Build & Static Code Checks](https://github.com/VoiSmart/mod_openai_audio_stream/actions/workflows/checks.yml/badge.svg)
+![Build & Static Code Checks](https://github.com/VoiSmart/mod_openai_audio_stream/actions/workflows/checks.yml/badge.svg?branch=main)
 
 **mod_openai_audio_stream** is a FreeSWITCH module that streams L16 audio from a channel to an OpenAI Realtime WebSocket endpoint. The stream follows OpenAI's Realtime API specification and enables real-time audio playback directly in the channel.  
 
