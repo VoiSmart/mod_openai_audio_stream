@@ -230,7 +230,10 @@ public:
         return out_buffer;
     }
 
-    std::string createWavFromRaw(std::string rawAudio) {
+    // create wav file from raw audio 
+    // rawAudio passed as constant reference because it is never edited
+    std::string createWavFromRaw(const std::string& rawAudio) {
+
         const int numChannels = 1; // mono
         const int bitsPerSample = 16; // pcm16
         int byteRate = in_sample_rate * numChannels * bitsPerSample / 8;
@@ -1012,7 +1015,9 @@ extern "C" {
         {
             auto* tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
             char sessionId[MAX_SESSION_ID];
-            strcpy(sessionId, tech_pvt->sessionId);
+
+            strncpy(sessionId, tech_pvt->sessionId, MAX_SESSION_ID - 1);
+            sessionId[MAX_SESSION_ID - 1] = '\0';
 
             switch_mutex_lock(tech_pvt->mutex);
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) stream_session_cleanup\n", sessionId);

@@ -48,8 +48,7 @@ jobs:
 
             scan-build --status-bugs cmake --build build -j"$(nproc)"
 
-            clang-tidy -p build $(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx') \
-            FILES="$(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx')"
+            FILES="$(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx' | grep -v '^buffer/' | grep -v '^libs/')"
             if [ -n "$FILES" ]; then
               clang-tidy -p build $FILES \
                 --warnings-as-errors='clang-analyzer-*,bugprone-*,performance-*'
@@ -58,8 +57,19 @@ jobs:
             fi
 
 
-            cppcheck --enable=warning,style,performance,portability --std=c++17 --force \
+            cppcheck --enable=warning,performance,portability --std=c++17 --force \
                      --project=build/compile_commands.json \
                      --suppress=missingIncludeSystem \
-                     -i build . 2> cppcheck.log || true
-            cat cppcheck.log
+                     -i build -i buffer -i libs 2> cppcheck-warn.log
+
+            cppcheck --enable=style --std=c++17 --force \
+                     --project=build/compile_commands.json \
+                     --suppress=missingIncludeSystem \
+                     -i build -i buffer -i libs 2> cppcheck-style.log || true
+
+            if [ -s cppcheck-style.log ]; then
+              echo "Style issues found by cppcheck:"
+              cat cppcheck-style.log
+            else
+              echo "No style issues found by cppcheck."
+            fi
