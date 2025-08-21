@@ -194,36 +194,51 @@ public:
         }
     }
 
+    
     std::vector<int16_t> resampleRawAudio(const std::string& input_raw) {
-
         size_t in_samples = input_raw.size() / 2;
-        size_t out_samples = static_cast<size_t>(in_samples * out_sample_rate / static_cast<float>(in_sample_rate)) + 1;
+
+        double scaled = static_cast<double>(in_samples) * out_sample_rate / in_sample_rate;
+        size_t out_samples = static_cast<size_t>(scaled) + 1;
 
         std::vector<int16_t> in_buffer(in_samples);
         std::vector<int16_t> out_buffer(out_samples);
 
         std::memcpy(in_buffer.data(), input_raw.data(), input_raw.size());
 
-        spx_uint32_t in_len = in_samples;
-        spx_uint32_t out_len = out_samples;
-
-        int err = speex_resampler_process_int(m_resampler, 0, in_buffer.data(), &in_len, out_buffer.data(), &out_len);
-
-        if (err != RESAMPLER_ERR_SUCCESS) {
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Resampling failed with error code: %d\n", err);
-            return std::vector<int16_t>(); // return empty vector on error
+        if (in_samples > UINT32_MAX || out_samples > UINT32_MAX) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
+                              "Too many samples to resample: in=%zu, out=%zu\n",
+                              in_samples, out_samples);
+            return {};
         }
 
-        out_buffer.resize(out_len);  // resize to actual size used
+        spx_uint32_t in_len = static_cast<spx_uint32_t>(in_samples);
+        spx_uint32_t out_len = static_cast<spx_uint32_t>(out_samples);
+
+        int err = speex_resampler_process_int(m_resampler, 0,
+                                              in_buffer.data(), &in_len,
+                                              out_buffer.data(), &out_len);
+
+        if (err != RESAMPLER_ERR_SUCCESS) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
+                              "Resampling failed with error code: %d\n", err);
+            return {}; // empty on error
+        }
+
+        out_buffer.resize(out_len);  // resize to actual resampled size
         return out_buffer;
     }
 
-    std::string createWavFromRaw(std::string rawAudio) {
+    // create wav file from raw audio 
+    // rawAudio passed as constant reference because it is never edited
+    std::string createWavFromRaw(const std::string& rawAudio) {
+
         const int numChannels = 1; // mono
         const int bitsPerSample = 16; // pcm16
         int byteRate = in_sample_rate * numChannels * bitsPerSample / 8;
         int blockAlign = numChannels * bitsPerSample / 8;
-        uint32_t dataSize = rawAudio.size();
+        uint32_t dataSize = static_cast<uint32_t>(rawAudio.size());
         uint32_t chunkSize = 36 + dataSize;
 
         std::ostringstream wavStream; // write in string like stream
@@ -449,8 +464,10 @@ namespace {
 
             memset(tech_pvt, 0, sizeof(private_t));
 
-            strncpy(tech_pvt->sessionId, switch_core_session_get_uuid(session), MAX_SESSION_ID);
-            strncpy(tech_pvt->ws_uri, wsUri, MAX_WS_URI);
+            strncpy(tech_pvt->sessionId, switch_core_session_get_uuid(session), MAX_SESSION_ID - 1);
+            tech_pvt->sessionId[MAX_SESSION_ID - 1] = '\0';
+            strncpy(tech_pvt->ws_uri, wsUri, MAX_WS_URI - 1);
+            tech_pvt->ws_uri[MAX_WS_URI - 1] = '\0';
             tech_pvt->sampling = desiredSampling;
             tech_pvt->responseHandler = responseHandler;
             tech_pvt->rtp_packets = rtp_packets;
@@ -480,7 +497,7 @@ namespace {
 
             switch_mutex_init(&tech_pvt->mutex, SWITCH_MUTEX_NESTED, pool);
 
-            if (desiredSampling != sampling) {
+            if (static_cast<uint32_t>(desiredSampling) != sampling) {
                 if (switch_buffer_create(pool, &tech_pvt->sbuffer, buflen) != SWITCH_STATUS_SUCCESS) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                         "%s: Error creating switch buffer.\n", tech_pvt->sessionId);
@@ -510,7 +527,7 @@ namespace {
                 ringBufferInit(tech_pvt->buffer, tech_pvt->data, adjSize);
             }
 
-            if (desiredSampling != sampling) {
+            if (static_cast<uint32_t>(desiredSampling) != sampling) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) resampling from %u to %u\n", tech_pvt->sessionId, sampling, desiredSampling);
                 tech_pvt->resampler = speex_resampler_init(channels, sampling, desiredSampling, SWITCH_RESAMPLE_QUALITY, &err);
                 if (0 != err) {
@@ -559,17 +576,14 @@ namespace {
 
 extern "C" {
     int validate_ws_uri(const char* url, char* wsUri) {
-        const char* scheme = nullptr;
         const char* hostStart = nullptr;
         const char* hostEnd = nullptr;
         const char* portStart = nullptr;
 
         // Check scheme
         if (strncmp(url, "ws://", 5) == 0) {
-            scheme = "ws";
             hostStart = url + 5;
         } else if (strncmp(url, "wss://", 6) == 0) {
-            scheme = "wss";
             hostStart = url + 6;
         } else {
             return 0;
@@ -728,7 +742,7 @@ extern "C" {
                                         int channels,
                                         void **ppUserData)
     {
-        int deflate, heart_beat;
+        int deflate = 0, heart_beat = 0;
         bool suppressLog = false;
         const char* buffer_size;
         const char* extra_headers;
@@ -957,8 +971,6 @@ extern "C" {
             return SWITCH_TRUE;
         }
 
-        uint32_t available = switch_buffer_inuse(tech_pvt->playback_buffer);
-
         uint32_t bytes_needed = frame->datalen;
         uint32_t bytes_per_sample = frame->datalen / frame->samples;
 
@@ -1003,7 +1015,9 @@ extern "C" {
         {
             auto* tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
             char sessionId[MAX_SESSION_ID];
-            strcpy(sessionId, tech_pvt->sessionId);
+
+            strncpy(sessionId, tech_pvt->sessionId, MAX_SESSION_ID - 1);
+            sessionId[MAX_SESSION_ID - 1] = '\0';
 
             switch_mutex_lock(tech_pvt->mutex);
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) stream_session_cleanup\n", sessionId);

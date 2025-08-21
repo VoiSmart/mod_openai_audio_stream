@@ -1,0 +1,81 @@
+# syntax=docker/dockerfile:1.7
+
+############################
+# Stage 1: Build dependencies + FreeSWITCH
+############################
+FROM debian:12 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	ca-certificates git curl wget \
+	build-essential cmake automake autoconf libtool libtool-bin libltdl-dev pkg-config \
+	libssl-dev zlib1g-dev libdb-dev unixodbc-dev libncurses5-dev libexpat1-dev \
+	libgdbm-dev bison erlang-dev libtpl-dev libtiff5-dev uuid-dev \
+	libpcre3-dev libpcre2-dev libedit-dev libsqlite3-dev libcurl4-openssl-dev nasm \
+	libogg-dev libspeex-dev libspeexdsp-dev libldns-dev python3-dev \
+	libavformat-dev libswscale-dev libswresample-dev \
+	liblua5.2-dev libopus-dev libpq-dev \
+	libsndfile1-dev libflac-dev libvorbis-dev \
+	&& rm -rf /var/lib/apt/lists/*
+
+
+WORKDIR /src
+
+RUN git clone https://github.com/signalwire/libks && \
+	git clone https://github.com/freeswitch/sofia-sip && \
+	git clone https://github.com/freeswitch/spandsp && \
+	git clone https://github.com/signalwire/signalwire-c && \
+	git clone https://github.com/signalwire/freeswitch
+
+# libks
+WORKDIR /src/libks
+RUN cmake . -DCMAKE_INSTALL_PREFIX=/usr -DWITH_LIBBACKTRACE=1 && \
+	make -j"$(nproc)" && make install
+
+# sofia-sip
+WORKDIR /src/sofia-sip
+RUN ./bootstrap.sh && \
+	./configure --with-pic --with-glib=no --without-doxygen --disable-stun --prefix=/usr && \
+	make -j"$(nproc)" && make install
+
+# spandsp
+WORKDIR /src/spandsp
+RUN ./bootstrap.sh && \
+	./configure --with-pic --prefix=/usr && \
+	make -j"$(nproc)" && make install
+
+# signalwire-c
+WORKDIR /src/signalwire-c
+RUN PKG_CONFIG_PATH=/usr/lib/pkgconfig cmake . -DCMAKE_INSTALL_PREFIX=/usr && \
+	make -j"$(nproc)" && make install
+
+# FreeSWITCH SDK
+WORKDIR /src/freeswitch
+RUN ./bootstrap.sh -j && \
+	./configure --prefix=/usr && \
+	make -j"$(nproc)" && make install
+
+############################
+# Stage 2: Slim SDK image (no FreeSWITCH runtime)
+############################
+FROM debian:12
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	build-essential \
+	clang clang-tidy clang-tools \
+	cppcheck cmake pkg-config ccache \
+	libssl-dev zlib1g-dev \
+	libspeexdsp-dev libspandsp-dev \
+	git curl wget \
+	&& rm -rf /var/lib/apt/lists/*
+
+# Copy only SDK bits
+COPY --from=builder /usr/include/freeswitch/ /usr/include/freeswitch/
+COPY --from=builder /usr/lib/pkgconfig/freeswitch.pc /usr/lib/pkgconfig/
+COPY --from=builder /usr/lib/libfreeswitch.so* /usr/lib/
+
+WORKDIR /work
