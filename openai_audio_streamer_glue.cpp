@@ -1012,7 +1012,9 @@ extern "C" {
         {
             auto* tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
             char sessionId[MAX_SESSION_ID];
-            strcpy(sessionId, tech_pvt->sessionId);
+
+            strncpy(sessionId, tech_pvt->sessionId, MAX_SESSION_ID - 1);
+            sessionId[MAX_SESSION_ID - 1] = '\0';
 
             switch_mutex_lock(tech_pvt->mutex);
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) stream_session_cleanup\n", sessionId);

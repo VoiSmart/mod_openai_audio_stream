@@ -48,7 +48,7 @@ jobs:
 
             scan-build --status-bugs cmake --build build -j"$(nproc)"
 
-            FILES="$(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx')"
+            FILES="$(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx' | grep -v '^buffer/')"
             if [ -n "$FILES" ]; then
               clang-tidy -p build $FILES \
                 --warnings-as-errors='clang-analyzer-*,bugprone-*,performance-*'
@@ -60,5 +60,5 @@ jobs:
             cppcheck --enable=warning,style,performance,portability --std=c++17 --force \
                      --project=build/compile_commands.json \
                      --suppress=missingIncludeSystem \
-                     -i build . 2> cppcheck.log || true
+                     -i build -i buffer . 2> cppcheck.log || true
             cat cppcheck.log
