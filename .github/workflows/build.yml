@@ -8,6 +8,10 @@ on:
     branches: [ main, develop ]
   workflow_dispatch:
 
+concurrency:
+  group: ghcr-publish              # run in the same group do not overlap
+  cancel-in-progress: false
+
 permissions:
   contents: read
   packages: read
