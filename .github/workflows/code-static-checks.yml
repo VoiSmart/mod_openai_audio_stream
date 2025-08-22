@@ -15,7 +15,7 @@ jobs:
   analyze:
     runs-on: ubuntu-22.04
     container:
-      image: ghcr.io/voismart/freeswitch-sdk:ci # make org name dinamic in case of future org name changes 
+      image: ghcr.io/voismart/freeswitch-sdk:ci # make org name dynamic in case of future org name changes 
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
