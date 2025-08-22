@@ -9,7 +9,7 @@ on:
 
 permissions:
   contents: read
-  packages: read   # per pull da GHCR privato
+  packages: read   # to pull from private GHCR
 
 jobs:
   analyze:
