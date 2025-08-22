@@ -2,12 +2,11 @@
 name: Build & Publish SDK image
 
 on:
-  push:
-    branches: [ main, develop, ghcr-sdk-image ]
-    paths:
-      - Dockerfile.ci
-      - .github/workflows/sdk-image.yml
   workflow_dispatch:
+
+concurrency:
+  group: ghcr-publish              # run in the same group do not overlap
+  cancel-in-progress: false
 
 permissions:
   contents: read

@@ -2,11 +2,11 @@
 name: Build
 
 on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
   workflow_dispatch:
-
-concurrency:
-  group: ghcr-publish              # run in the same group do not overlap
-  cancel-in-progress: false
 
 permissions:
   contents: read
