@@ -2,7 +2,7 @@ name: Static Checks
 
 on:
   push:
-    branches: [ develop ] # never pushing directly to main
+    branches: [ main, develop ] # never pushing directly to main
   pull_request:
     branches: [ main, develop ]
   workflow_dispatch:
