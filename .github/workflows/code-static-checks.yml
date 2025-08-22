@@ -1,0 +1,79 @@
+name: Static Checks
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read   # per pull da GHCR privato
+
+jobs:
+  analyze:
+    runs-on: ubuntu-22.04
+    container:
+      image: ghcr.io/${{ toLower(github.repository_owner) }}/freeswitch-sdk:ci
+      # se l’immagine è privata:
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        run: |
+          set -eux
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Analyze
+        run: |
+          set -eux
+          scan-build --status-bugs cmake --build build -j"$(nproc)"
+
+          FILES="$(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx' | grep -v '^buffer/' | grep -v '^libs/')"
+          if [ -n "$FILES" ]; then
+            clang-tidy -p build $FILES \
+              --warnings-as-errors='clang-analyzer-*,bugprone-*,performance-*'
+          else
+            echo "No source files found for clang-tidy analysis."
+          fi
+
+          cppcheck --enable=warning,performance,portability --std=c++17 --force \
+                   --project=build/compile_commands.json \
+                   --suppress=missingIncludeSystem \
+                   -i build -i buffer -i libs 2> cppcheck-warn.log
+
+          cppcheck --enable=style --std=c++17 --force \
+                   --project=build/compile_commands.json \
+                   --suppress=missingIncludeSystem \
+                   -i build -i buffer -i libs 2> cppcheck-style.log || true
+
+          if [ -s cppcheck-style.log ]; then
+            echo "Style issues found by cppcheck:"
+            cat cppcheck-style.log
+          else
+            echo "No style issues found by cppcheck."
+          fi
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-checks-logs
+          path: |
+            cppcheck-warn.log
+            cppcheck-style.log
+            build/compile_commands.json
