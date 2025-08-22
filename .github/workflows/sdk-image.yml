@@ -1,0 +1,54 @@
+
+name: Build & Publish SDK image
+
+on:
+  push:
+    branches: [ main, develop, ghcr-sdk-image ]
+    paths:
+      - Dockerfile.ci
+      - .github/workflows/sdk-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write  # to push to GHCR
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Compute lowercase image name
+        run: |
+          owner_lc=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=ghcr.io/${owner_lc}/freeswitch-sdk" >> $GITHUB_ENV
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=ci
+            type=sha,format=short
+            type=ref,event=branch
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ci
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:cache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:cache,mode=max
