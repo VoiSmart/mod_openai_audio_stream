@@ -3,7 +3,7 @@ name: Build
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ develop ] # never pushing directly to main so no push check on main
   pull_request:
     branches: [ main, develop ]
   workflow_dispatch:
