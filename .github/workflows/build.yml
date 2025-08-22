@@ -3,7 +3,7 @@ name: Build
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ develop ] # never pushing directly to main so no push check on main
   pull_request:
     branches: [ main, develop ]
   workflow_dispatch:
@@ -42,16 +42,3 @@ jobs:
                 -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
                 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build -j"$(nproc)"
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifacts
-          path: |
-            build/**/*.so
-            build/**/*.a
-            build/**/*.dll
-            build/**/*.dylib
-            build/**/*.exe
-            build/compile_commands.json
-          if-no-files-found: ignore
