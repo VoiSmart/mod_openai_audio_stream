@@ -11,10 +11,11 @@ It is a fork of [mod_audio_stream](https://github.com/amigniter/mod_audio_stream
 The goal of **mod_openai_audio_stream** is to provide a simple, lightweight, yet effective module for streaming audio and receiving responses directly from OpenAI’s Realtime WebSocket into the call through FreeSWITCH. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), a C++ WebSocket library compiled as a static library.  
 
 
-## Notes 
+## Important Notes 
 
 * Use L16 format in your `session.update` to have the audio playback and temporal audio files creation to work properly. The module was tested with OpenAI's Realtime API set on L16 format. 
 * You do not have to worry about the incoming sampling rate, the module resamples the audio to match the channels frame codec. 
+* **Specify the OpenAI Realtime model in the URI** using the correct sampling rate (24K), e.g. `uuid_openai_audio_stream ${uuid} start wss://api.openai.com/v1/realtime?model=gpt-realtime mono 24k`
 
 ## Installation
 
@@ -78,7 +79,6 @@ The following channel variables can be used to fine tune websocket connection an
 - `Buffer Size` actually represents a duration of audio chunk sent to websocket. If you want to send e.g. 100ms audio packets to your ws endpoint
 you would set this variable to 100. If ommited, default packet size of 20ms will be sent as grabbed from the audio channel (which is default FreeSWITCH frame size)
 - Set `STREAM_OPENAI_API_KEY` to have a valid OpenAI API key to authenticate with OpenAI's Realtime API. This is required for the module to function properly. If not set the module will use the `STREAM_EXTRA_HEADERS` to pass the OpenAI API key as a header assuming you prepared the headers in the channel variable. **NOTE**: An OpenAI API key is required for the module to function properly. If not set, the module will not be able to connect to the API.
-- You can specify the OpenAI Realtime model in the URI, e.g. `uuid_openai_audio_stream ${uuid} start wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17 mono 24k`
 
 - Extra headers should be a JSON object with key-value pairs representing additional HTTP headers. Each key should be a header name, and its corresponding value should be a string.
   ```json
