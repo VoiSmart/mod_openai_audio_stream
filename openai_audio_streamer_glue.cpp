@@ -284,7 +284,6 @@ public:
 
         if(jsType && strstr(jsType, "error")) { 
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - error: %s\n", m_sessionId.c_str(), message.c_str());
-            status = SWITCH_TRUE;
 
         } else if(jsType && strcmp(jsType, "input_audio_buffer.speech_started") == 0) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - speech started\n", m_sessionId.c_str());
