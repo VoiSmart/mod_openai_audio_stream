@@ -355,7 +355,6 @@ public:
     void push_audio_queue(const std::vector<int16_t>& audio_data) {
         std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
         m_audio_queue.push(audio_data);
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "(%s) audio queue size: %zu\n", m_sessionId.c_str(), m_audio_queue.size());
     }
 
     std::vector<int16_t> pop_audio_queue() {
