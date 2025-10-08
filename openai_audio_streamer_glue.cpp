@@ -298,6 +298,7 @@ public:
         } else if(jsType && strcmp(jsType, "response.audio.delta") == 0) {
             const char* jsonAudio = cJSON_GetObjectCstr(json, "delta");
             playback_clear_requested = false;
+            m_response_audio_done = false;
             
             if(jsonAudio && strlen(jsonAudio) > 0) {
                 std::string rawAudio;
@@ -336,7 +337,10 @@ public:
             } else {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - response.audio.delta no audio data\n", m_sessionId.c_str());
             }
-        }
+        } else if(jsType && strcmp(jsType, "response.audio.done") == 0) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - audio done\n", m_sessionId.c_str());
+            m_response_audio_done = true;
+        } 
         cJSON_Delete(json);
         return status;
     }
@@ -351,6 +355,7 @@ public:
     void push_audio_queue(const std::vector<int16_t>& audio_data) {
         std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
         m_audio_queue.push(audio_data);
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "(%s) audio queue size: %zu\n", m_sessionId.c_str(), m_audio_queue.size());
     }
 
     std::vector<int16_t> pop_audio_queue() {
@@ -429,6 +434,33 @@ public:
         return playback_clear_requested;
     }
 
+    bool is_openai_speaking() {
+        return m_openai_speaking;
+    }
+
+    bool is_response_audio_done() {
+        return m_response_audio_done;
+    }
+
+    void openai_speech_started() {
+        m_openai_speaking = true;
+        switch_core_session_t* psession = switch_core_session_locate(m_sessionId.c_str());
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "(%s) Openai started speaking\n", m_sessionId.c_str());
+        const char *payload = "{\"status\":\"started\"}";
+        m_notify(psession, EVENT_OPENAI_SPEECH_STARTED, payload);
+        switch_core_session_rwunlock(psession);
+     }
+
+    void openai_speech_stopped() {
+        m_openai_speaking = false;
+        switch_core_session_t* psession = switch_core_session_locate(m_sessionId.c_str());
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "(%s) Openai stopped speaking\n", m_sessionId.c_str());
+
+        const char *payload = "{\"status\":\"stopped\"}";
+        m_notify(psession, EVENT_OPENAI_SPEECH_STOPPED, payload);
+        switch_core_session_rwunlock(psession);
+     }
+
 
 private:
     std::string m_sessionId;
@@ -446,6 +478,8 @@ private:
     std::mutex m_audio_queue_mutex;
     bool playback_clear_requested = false; 
     bool m_disable_audiofiles = false; // disable saving audio files if true
+    bool m_openai_speaking = false;
+    bool m_response_audio_done = false;
 };
 
 
@@ -983,11 +1017,16 @@ extern "C" {
 
         if (as->clear_requested()) {
             switch_buffer_zero(tech_pvt->playback_buffer);
+            inuse = 0;
         }
         if (inuse < bytes_needed * 2 && !as->is_audio_queue_empty()) {
             auto chunk = as->pop_audio_queue();
             switch_buffer_write(tech_pvt->playback_buffer, chunk.data(), chunk.size() * sizeof(int16_t));
         } else if (inuse == 0) {
+            // Openai just finished speaking for interruption or end of response
+            if(as->is_openai_speaking() && as->is_response_audio_done()) { 
+                as->openai_speech_stopped();
+            }
             return SWITCH_TRUE;
         }
 
@@ -997,6 +1036,10 @@ extern "C" {
             switch_buffer_read(tech_pvt->playback_buffer, data, bytes_needed);
         } else { 
             switch_buffer_read(tech_pvt->playback_buffer, data, inuse);
+        }
+
+        if (!as->is_openai_speaking()) {
+            as->openai_speech_started();
         }
 
         frame->datalen = inuse > bytes_needed ? bytes_needed : inuse;
@@ -1043,4 +1086,3 @@ extern "C" {
         return SWITCH_STATUS_FALSE;
     }
 }
-
