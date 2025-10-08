@@ -71,7 +71,6 @@ The following channel variables can be used to fine tune websocket connection an
 | STREAM_TLS_DISABLE_HOSTNAME_VALIDATION | true or 1 disable hostname check in WSS connections     | false   |
 | STREAM_DISABLE_AUDIOFILES              | true or 1, disables debug audio files generation in tmp | false   |
 | STREAM_OPENAI_API_KEY                  | OpenAI API key, used for authentication with OpenAI's   | none    |
-| STREAM_OPENAI_REALTIME_VERSION         | OpenAI Realtime API version, e.g. "v1"                  | v1      |
 
 - Per message deflate compression option is enabled by default. It can lead to a very nice bandwidth savings. To disable it set the channel var to `true|1`.
 - Heart beat, sent every xx seconds when there is no traffic to make sure that load balancers do not kill an idle connection.

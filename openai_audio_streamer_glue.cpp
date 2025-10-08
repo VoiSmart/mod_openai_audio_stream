@@ -295,7 +295,7 @@ public:
 
             status = SWITCH_TRUE;
 
-        } else if(jsType && strcmp(jsType, "response.audio.delta") == 0) {
+        } else if(jsType && strcmp(jsType, "response.output_audio.delta") == 0) {
             const char* jsonAudio = cJSON_GetObjectCstr(json, "delta");
             playback_clear_requested = false;
             m_response_audio_done = false;
@@ -335,9 +335,9 @@ public:
                 status = SWITCH_TRUE;
 
             } else {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - response.audio.delta no audio data\n", m_sessionId.c_str());
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - response.output_audio.delta no audio data\n", m_sessionId.c_str());
             }
-        } else if(jsType && strcmp(jsType, "response.audio.done") == 0) {
+        } else if(jsType && strcmp(jsType, "response.output_audio.done") == 0) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - audio done\n", m_sessionId.c_str());
             m_response_audio_done = true;
         } 
@@ -806,8 +806,6 @@ extern "C" {
         tls_keyfile = switch_channel_get_variable(channel, "STREAM_TLS_KEY_FILE");
         tls_certfile = switch_channel_get_variable(channel, "STREAM_TLS_CERT_FILE");
         openai_api_key = switch_channel_get_variable(channel, "STREAM_OPENAI_API_KEY"); 
-        openai_realtime_version = switch_channel_get_variable(channel, "STREAM_OPENAI_REALTIME_VERSION");
-
 
         if (switch_channel_var_true(channel, "STREAM_TLS_DISABLE_HOSTNAME_VALIDATION")) {
             tls_disable_hostname_validation = true;
@@ -837,17 +835,9 @@ extern "C" {
         }
 
         if (openai_api_key) {
-            const char* api_version;
-            if (openai_realtime_version) { 
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Using OpenAI Realtime version: %s\n", openai_realtime_version);
-                api_version = openai_realtime_version;
-            } else {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "OPENAI_REALTIME_VERSION is not set. Using v1 as default.\n");
-                api_version = "v1"; // default version
-            }
             char headers_buf[1024] = {0};
             snprintf(headers_buf, sizeof(headers_buf),
-                     "{\"Authorization\": \"Bearer %s\", \"OpenAI-Beta\": \"realtime=%s\"}", openai_api_key, api_version); 
+                     "{\"Authorization\": \"Bearer %s\"}", openai_api_key); 
             extra_headers = headers_buf;
         } else {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "OPENAI_API_KEY is not set. Assuming you set STREAM_EXTRA_HEADERS variable.\n");
