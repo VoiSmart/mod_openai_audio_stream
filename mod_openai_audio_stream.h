@@ -10,11 +10,13 @@
 #define MAX_SESSION_ID (256)
 #define MAX_WS_URI (4096)
 
-#define EVENT_CONNECT           "mod_openai_audio_stream::connect"
-#define EVENT_DISCONNECT        "mod_openai_audio_stream::disconnect"
-#define EVENT_ERROR             "mod_openai_audio_stream::error"
-#define EVENT_JSON              "mod_openai_audio_stream::json"
-#define EVENT_PLAY              "mod_openai_audio_stream::play"
+#define EVENT_CONNECT                 "mod_openai_audio_stream::connect"
+#define EVENT_DISCONNECT              "mod_openai_audio_stream::disconnect"
+#define EVENT_ERROR                   "mod_openai_audio_stream::error"
+#define EVENT_JSON                    "mod_openai_audio_stream::json"
+#define EVENT_PLAY                    "mod_openai_audio_stream::play"
+#define EVENT_OPENAI_SPEECH_STARTED   "mod_openai_audio_stream::openai_speech_start"
+#define EVENT_OPENAI_SPEECH_STOPPED   "mod_openai_audio_stream::openai_speech_stop"
 
 typedef void (*responseHandler_t)(switch_core_session_t* session, const char* eventName, const char* json);
 
