@@ -54,6 +54,36 @@ sudo make install
 ```
 **TLS** is `OFF` by default. To build with TLS support add `-DUSE_TLS=ON` to cmake line.
 
+### Getting started
+
+#### A simple dialplan example
+The following is **a simple dialplan example** that demonstrates how to use the module to stream audio to OpenAI's Realtime API and play back the responses.
+
+```xml
+    <extension name="openai">
+      <condition field="destination_number" expression="^.*$"> <!-- match all, change based on your needs -->
+        <action application="set" data="STREAM_OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxx" /> 
+        <action application="set" data="STREAM_DISABLE_AUDIOFILES=true"/>
+        <action application="answer" />
+        <action application="set"
+        data="api_result=${uuid_openai_audio_stream ${uuid} start wss://api.openai.com/v1/realtime?model=gpt-realtime mono 24k}" />
+        <action application="playback" data="silence_stream://-1//"/>
+        <action application="set" data="api_result=${uuid_openai_audio_stream ${uuid} stop}"/> 
+        <action application="hangup"/>
+      </condition>
+    </extension>
+```
+
+* Make sure to replace `sk-xxxxxxxxxxxxxxxxxx` with your actual OpenAI API key.
+* The dialplan answers the call and starts streaming audio to OpenAI's Realtime API using `uuid_openai_audio_stream`, so you can try it out and see the OpenAI events in the FreeSWITCH console within the `mod_openai_audio_stream::json` events and other module events.
+* The playback action with `silence_stream://-1//` is needed for audio playback to work properly. For more details, check issue [#16](https://github.com/VoiSmart/mod_openai_audio_stream/issues/16).
+
+#### Next steps
+
+The **getting started** example is a basic demonstration of how to use the module. For **more advanced usage**, we suggest piloting the module from an external application, for example using FreeSWITCH's Event Socket Library (ESL) or other methods to **receive events from FreeSWITCH** and send commands to **control the call flow**.
+
+This way you can build more complex applications **allowing for function calls, updating instructions**, and other interactions with OpenAI's Realtime API. Check out the [OpenAI Realtime documentation](https://platform.openai.com/docs/guides/realtime) and [API reference](https://platform.openai.com/docs/api-reference/realtime) for more details on how to structure your requests and handle responses.
+
 ### Channel variables
 The following channel variables can be used to fine tune websocket connection and also configure mod_openai_audio_stream logging:
 
@@ -202,7 +232,7 @@ The audio delta response may include other fields, but not so important for the 
 ```json
 {
   ...
-  "type": "response.audio.delta",
+  "type": "response.output_audio.delta",
   "delta": "BASE64_ENCODED_AUDIO...",
   ...
 }
