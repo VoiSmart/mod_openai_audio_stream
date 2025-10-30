@@ -218,7 +218,6 @@ SWITCH_STANDARD_API(stream_function)
                     int next_index = 4;
                     if (!strcasecmp(argv[next_index], "mute_user")) {
                         start_muted = SWITCH_TRUE;
-                        next_index++;
                     } else {
                         sampling_str = argv[next_index];
                         if (0 == strcmp(sampling_str, "16k")) {

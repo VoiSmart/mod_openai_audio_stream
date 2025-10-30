@@ -148,14 +148,14 @@ public:
         if(!channel) {
             return nullptr;
         }
-        auto *bug = (switch_media_bug_t *) switch_channel_get_private(channel, MY_BUG_NAME);
+        auto *bug = static_cast<switch_media_bug_t *>(switch_channel_get_private(channel, MY_BUG_NAME));
         return bug;
     }
 
     inline void media_bug_close(switch_core_session_t *session) {
         auto *bug = get_media_bug(session);
         if(bug) {
-            auto* tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
+            auto* tech_pvt = static_cast<private_t*>(switch_core_media_bug_get_user_data(bug));
             tech_pvt->close_requested = 1;
             switch_core_media_bug_close(&bug, SWITCH_FALSE);
         }
@@ -413,7 +413,7 @@ public:
 
     void writeBinary(uint8_t* buffer, size_t len) {
         if(!this->isConnected()) return;
-        webSocket.sendBinary(ix::IXWebSocketSendData((char *)buffer, len));
+        webSocket.sendBinary(ix::IXWebSocketSendData(reinterpret_cast<const char *>(buffer), len));
     }
 
     void writeText(const char* text) {  // Openai only accepts json not utf8 plain text
@@ -544,14 +544,14 @@ namespace {
                 }
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "%s: initializing buffer(%zu) to adjusted %zu bytes\n",
                               tech_pvt->sessionId, buflen, adjSize);
-                tech_pvt->data = (uint8_t *) switch_core_alloc(pool, adjSize);
+                tech_pvt->data = static_cast<uint8_t *>(switch_core_alloc(pool, adjSize));
                 if (!tech_pvt->data) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                       "%s: Error allocating memory for data buffer.\n", tech_pvt->sessionId);
                     return SWITCH_STATUS_FALSE;
                 }
                 memset(tech_pvt->data, 0, adjSize);
-                tech_pvt->buffer = (RingBuffer *) switch_core_alloc(pool, sizeof(RingBuffer));
+                tech_pvt->buffer = static_cast<RingBuffer *>(switch_core_alloc(pool, sizeof(RingBuffer)));
                 if (!tech_pvt->buffer) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                       "%s: Error allocating memory for ring buffer.\n", tech_pvt->sessionId);
@@ -589,7 +589,7 @@ namespace {
             tech_pvt->mutex = nullptr;
         }
         if (tech_pvt->pAudioStreamer) {
-            auto* as = (AudioStreamer *) tech_pvt->pAudioStreamer;
+            auto* as = static_cast<AudioStreamer*>(tech_pvt->pAudioStreamer);
             delete as;
             tech_pvt->pAudioStreamer = nullptr;
         }
@@ -597,7 +597,7 @@ namespace {
 
     void finish(private_t* tech_pvt) {
         std::shared_ptr<AudioStreamer> aStreamer;
-        aStreamer.reset((AudioStreamer *)tech_pvt->pAudioStreamer);
+        aStreamer.reset(static_cast<AudioStreamer*>(tech_pvt->pAudioStreamer));
         tech_pvt->pAudioStreamer = nullptr;
 
         std::thread t([aStreamer]{
@@ -688,7 +688,7 @@ extern "C" {
     
     switch_status_t stream_session_send_json(switch_core_session_t *session, const char* base64_input) {
         switch_channel_t *channel = switch_core_session_get_channel(session);
-        switch_media_bug_t *bug = (switch_media_bug_t*) switch_channel_get_private(channel, MY_BUG_NAME);
+        auto *bug = static_cast<switch_media_bug_t *>(switch_channel_get_private(channel, MY_BUG_NAME));
         cJSON *json_obj = nullptr;
         char *json_unformatted = nullptr;
         switch_status_t status = SWITCH_STATUS_FALSE;
@@ -697,7 +697,7 @@ extern "C" {
             return SWITCH_STATUS_FALSE;
         }
 
-        auto *tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
+        auto *tech_pvt = static_cast<private_t*>(switch_core_media_bug_get_user_data(bug));
         if (!tech_pvt) { 
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_send_json failed to retrieve session data.\n");
             return SWITCH_STATUS_FALSE;
@@ -754,12 +754,12 @@ extern "C" {
 
     switch_status_t stream_session_pauseresume(switch_core_session_t *session, int pause) {
         switch_channel_t *channel = switch_core_session_get_channel(session);
-        auto *bug = (switch_media_bug_t*) switch_channel_get_private(channel, MY_BUG_NAME);
+        auto *bug = static_cast<switch_media_bug_t *>(switch_channel_get_private(channel, MY_BUG_NAME));
         if (!bug) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_pauseresume failed because no bug\n");
             return SWITCH_STATUS_FALSE;
         }
-        auto *tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
+        auto *tech_pvt = static_cast<private_t*>(switch_core_media_bug_get_user_data(bug));
 
         if (!tech_pvt) return SWITCH_STATUS_FALSE;
 
@@ -770,12 +770,12 @@ extern "C" {
 
     switch_status_t stream_session_set_user_mute(switch_core_session_t *session, int mute) {
         switch_channel_t *channel = switch_core_session_get_channel(session);
-        auto *bug = (switch_media_bug_t*) switch_channel_get_private(channel, MY_BUG_NAME);
+        auto *bug = static_cast<switch_media_bug_t *>(switch_channel_get_private(channel, MY_BUG_NAME));
         if (!bug) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_set_user_mute failed because no bug\n");
             return SWITCH_STATUS_FALSE;
         }
-        auto *tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
+        auto *tech_pvt = static_cast<private_t*>(switch_core_media_bug_get_user_data(bug));
         if (!tech_pvt) {
             return SWITCH_STATUS_FALSE;
         }
@@ -864,12 +864,12 @@ extern "C" {
                      "{\"Authorization\": \"Bearer %s\"}", openai_api_key); 
             extra_headers = headers_buf;
         } else {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "OPENAI_API_KEY is not set. Assuming you set STREAM_EXTRA_HEADERS variable.\n");
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_WARNING, "OPENAI_API_KEY is not set. Assuming you set STREAM_EXTRA_HEADERS variable.\n");
             extra_headers = switch_channel_get_variable(channel, "STREAM_EXTRA_HEADERS");
         }
 
         // allocate per-session tech_pvt
-        auto* tech_pvt = (private_t *) switch_core_session_alloc(session, sizeof(private_t));
+        auto* tech_pvt = static_cast<private_t *>(switch_core_session_alloc(session, sizeof(private_t)));
 
         if (!tech_pvt) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "error allocating memory!\n");
@@ -888,7 +888,7 @@ extern "C" {
 
     switch_bool_t stream_frame(switch_media_bug_t *bug)
     {
-        auto* tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
+        auto* tech_pvt = static_cast<private_t*>(switch_core_media_bug_get_user_data(bug));
         if (!tech_pvt || tech_pvt->audio_paused || tech_pvt->user_audio_muted) return SWITCH_TRUE;
 
         if (switch_mutex_trylock(tech_pvt->mutex) == SWITCH_STATUS_SUCCESS) {
@@ -914,7 +914,7 @@ extern "C" {
                 while (switch_core_media_bug_read(bug, &frame, SWITCH_TRUE) == SWITCH_STATUS_SUCCESS) {
                     if(frame.datalen) {
                         if (1 == tech_pvt->rtp_packets) {
-                            pAudioStreamer->writeAudioDelta((uint8_t *) frame.data, frame.datalen);
+                            pAudioStreamer->writeAudioDelta(static_cast<uint8_t *>(frame.data), frame.datalen);
                             continue;
                         }
 
@@ -961,13 +961,13 @@ extern "C" {
                         if(tech_pvt->channels == 1) {
                             speex_resampler_process_int(tech_pvt->resampler,
                                             0,
-                                            (const spx_int16_t *)frame.data,
+                                            static_cast<const spx_int16_t *>(frame.data),
                                             &in_len,
                                             &out[0],
                                             &out_len);
                         } else {
                             speex_resampler_process_interleaved_int(tech_pvt->resampler,
-                                            (const spx_int16_t *)frame.data,
+                                            static_cast<const spx_int16_t *>(frame.data),
                                             &in_len,
                                             &out[0],
                                             &out_len);
@@ -976,11 +976,11 @@ extern "C" {
                         if(out_len > 0) {
                             const size_t bytes_written = out_len * tech_pvt->channels * sizeof(spx_int16_t);
                             if (tech_pvt->rtp_packets == 1) { //20ms packet
-                                pAudioStreamer->writeAudioDelta((uint8_t *) out, bytes_written);
+                                pAudioStreamer->writeAudioDelta(reinterpret_cast<uint8_t *>(out), bytes_written);
                                 continue;
                             }
                             if (bytes_written <= inuse) {
-                                switch_buffer_write(tech_pvt->sbuffer, (const uint8_t *)out, bytes_written);
+                                switch_buffer_write(tech_pvt->sbuffer, out, bytes_written);
                             }
                         }
 
@@ -1000,7 +1000,7 @@ extern "C" {
     }
 
     switch_bool_t write_frame(switch_core_session_t *session, switch_media_bug_t *bug) {
-        private_t *tech_pvt = (private_t *)switch_core_media_bug_get_user_data(bug);
+        private_t *tech_pvt = static_cast<private_t *>(switch_core_media_bug_get_user_data(bug));
         if (!tech_pvt || tech_pvt->audio_paused) {
             return SWITCH_TRUE;
         }
@@ -1043,7 +1043,7 @@ extern "C" {
             return SWITCH_TRUE;
         }
 
-        switch_byte_t *data = (switch_byte_t *) frame->data;
+        switch_byte_t *data = static_cast<switch_byte_t *>(frame->data);
 
         if (inuse > bytes_needed) {
             switch_buffer_read(tech_pvt->playback_buffer, data, bytes_needed);
@@ -1065,10 +1065,10 @@ extern "C" {
 
     switch_status_t stream_session_cleanup(switch_core_session_t *session, char* text, int channelIsClosing) {
         switch_channel_t *channel = switch_core_session_get_channel(session);
-        auto *bug = (switch_media_bug_t*) switch_channel_get_private(channel, MY_BUG_NAME);
+        auto *bug = static_cast<switch_media_bug_t *>(switch_channel_get_private(channel, MY_BUG_NAME));
         if(bug)
         {
-            auto* tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
+            auto* tech_pvt = static_cast<private_t*>(switch_core_media_bug_get_user_data(bug));
             char sessionId[MAX_SESSION_ID];
 
             strncpy(sessionId, tech_pvt->sessionId, MAX_SESSION_ID - 1);
@@ -1082,7 +1082,7 @@ extern "C" {
                 switch_core_media_bug_remove(session, &bug);
             }
 
-            auto* audioStreamer = (AudioStreamer *) tech_pvt->pAudioStreamer;
+            auto* audioStreamer = static_cast<AudioStreamer *>(tech_pvt->pAudioStreamer);
             if(audioStreamer) {
                 audioStreamer->deleteFiles();
                 stream_session_send_json(session, text);
