@@ -286,18 +286,14 @@ public:
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - error: %s\n", m_sessionId.c_str(), message.c_str());
 
         } else if(jsType && strcmp(jsType, "input_audio_buffer.speech_started") == 0) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - user speech started\n", m_sessionId.c_str());
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "(%s) processMessage - user speech started, stopping openai audio playback\n", m_sessionId.c_str());
             clear_audio_queue();
             // also clear the private_t playback buffer used in write frame
             playback_clear_requested = true;
 
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - user speech detected stopping audio playback\n", m_sessionId.c_str());
-
-            status = SWITCH_TRUE;
-
         } else if (jsType && strcmp(jsType, "input_audio_buffer.speech_stopped") == 0) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - user speech stopped\n", m_sessionId.c_str());
-            playback_clear_requested = false;
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "(%s) processMessage - user speech stopped\n", m_sessionId.c_str());
+            // Do not clear playback_clear_requested here; it should remain true until new audio is received.
 
         } else if(jsType && strcmp(jsType, "response.output_audio.delta") == 0) {
             const char* jsonAudio = cJSON_GetObjectCstr(json, "delta");
@@ -813,7 +809,6 @@ extern "C" {
         const char* tls_keyfile = NULL;;
         const char* tls_certfile = NULL;;
         const char* openai_api_key = NULL;;
-        const char* openai_realtime_version = NULL;
         bool tls_disable_hostname_validation = false;
         bool disable_audiofiles = false;
 
