@@ -63,7 +63,8 @@ static switch_bool_t capture_callback(switch_media_bug_t *bug, void *user_data, 
 static switch_status_t start_capture(switch_core_session_t *session,
                                      switch_media_bug_flag_t flags,
                                      char* wsUri,
-                                     int sampling)
+                                     int sampling,
+                                     switch_bool_t start_muted)
 {
     switch_channel_t *channel = switch_core_session_get_channel(session);
     switch_media_bug_t *bug;
@@ -87,7 +88,7 @@ static switch_status_t start_capture(switch_core_session_t *session,
 
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "calling stream_session_init.\n");
     if (SWITCH_STATUS_FALSE == stream_session_init(session, responseHandler, read_codec->implementation->actual_samples_per_second,
-                                                 wsUri, sampling, channels, &pUserData)) {
+                                                 wsUri, sampling, channels, start_muted, &pUserData)) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Error initializing mod_openai_audio_stream session.\n");
         return SWITCH_STATUS_FALSE;
     }
@@ -127,6 +128,16 @@ static switch_status_t do_pauseresume(switch_core_session_t *session, int pause)
     return status;
 }
 
+static switch_status_t do_user_mute(switch_core_session_t *session, int mute)
+{
+    switch_status_t status = SWITCH_STATUS_SUCCESS;
+
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "mod_openai_audio_stream: %s\n", mute ? "mute" : "unmute");
+    status = stream_session_set_user_mute(session, mute);
+
+    return status;
+}
+
 static switch_status_t send_json(switch_core_session_t *session, char* json) {
     switch_status_t status = SWITCH_STATUS_FALSE;
     switch_channel_t *channel = switch_core_session_get_channel(session);
@@ -141,10 +152,10 @@ static switch_status_t send_json(switch_core_session_t *session, char* json) {
     return status;
 }
 
-#define STREAM_API_SYNTAX "<uuid> [start | stop | send_json | pause | resume | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000 | 24000]"
+#define STREAM_API_SYNTAX "<uuid> [start | stop | send_json | pause | resume | mute | unmute | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000 | 24000] [mute_user]"
 SWITCH_STANDARD_API(stream_function)
 {
-    char *mycmd = NULL, *argv[6] = { 0 };
+    char *mycmd = NULL, *argv[8] = { 0 };
     int argc = 0;
 
     switch_status_t status = SWITCH_STATUS_FALSE;
@@ -188,6 +199,8 @@ SWITCH_STANDARD_API(stream_function)
                 //switch_channel_t *channel = switch_core_session_get_channel(lsession);
                 char wsUri[MAX_WS_URI];
                 int sampling = 8000;
+                const char *sampling_str = NULL;
+                switch_bool_t start_muted = SWITCH_FALSE;
                 switch_media_bug_flag_t flags = SMBF_READ_STREAM;
                 flags |= SMBF_WRITE_REPLACE;
                 if (0 == strcmp(argv[3], "mixed")) {
@@ -202,14 +215,25 @@ SWITCH_STANDARD_API(stream_function)
                     goto done;
                 }
                 if (argc > 4) {
-                    if (0 == strcmp(argv[4], "16k")) {
-                        sampling = 16000;
-                    } else if (0 == strcmp(argv[4], "8k")) {
-                        sampling = 8000;
-                    } else if (0 == strcmp(argv[4], "24k")) {
-                        sampling = 24000;
+                    int next_index = 4;
+                    if (!strcasecmp(argv[next_index], "mute_user")) {
+                        start_muted = SWITCH_TRUE;
+                        next_index++;
                     } else {
-                        sampling = atoi(argv[4]);
+                        sampling_str = argv[next_index];
+                        if (0 == strcmp(sampling_str, "16k")) {
+                            sampling = 16000;
+                        } else if (0 == strcmp(sampling_str, "8k")) {
+                            sampling = 8000;
+                        } else if (0 == strcmp(sampling_str, "24k")) {
+                            sampling = 24000;
+                        } else {
+                            sampling = atoi(sampling_str);
+                        }
+                        next_index++;
+                        if (argc > next_index && !strcasecmp(argv[next_index], "mute_user")) {
+                            start_muted = SWITCH_TRUE;
+                        }
                     }
                 }
 
@@ -217,16 +241,24 @@ SWITCH_STANDARD_API(stream_function)
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                       "invalid websocket uri: %s\n", argv[2]);
                 } else if (sampling % 8000 != 0) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-                                      "invalid sample rate: %s\n", argv[4]);
+                    if (sampling_str) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                                          "invalid sample rate: %s\n", sampling_str);
+                    } else {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                                          "invalid sample rate: %d\n", sampling);
+                    }
                 } else {
-                    status = start_capture(lsession, flags, wsUri, sampling);
+                    status = start_capture(lsession, flags, wsUri, sampling, start_muted);
                 }
+            } else if (!strcasecmp(argv[1], "mute")) {
+                status = do_user_mute(lsession, 1);
+            } else if (!strcasecmp(argv[1], "unmute")) {
+                status = do_user_mute(lsession, 0);
             } else {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                   "unsupported mod_openai_audio_stream cmd: %s\n", argv[1]);
             }
-
 
             switch_core_session_rwunlock(lsession);
         } else {
@@ -270,6 +302,8 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_openai_audio_stream_load)
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid stop");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid pause");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid resume");
+    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid mute");
+    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid unmute");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid send_json");
 
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "mod_openai_audio_stream API successfully loaded\n");

@@ -131,19 +131,20 @@ Defaults to `false`, which enforces hostname match with the peer certificate.
 The freeswitch module exposes the following API commands:
 
 ```
-uuid_openai_audio_stream <uuid> start <wss-url> <mix-type> <sampling-rate> 
+uuid_openai_audio_stream <uuid> start <wss-url> <mix-type> [<sampling-rate>] [mute_user]
 ```
-Attaches a media bug and starts streaming audio (in L16 format) to the websocket server. FS default is 8k. If sampling-rate is other than 8k it will be resampled.
+Attaches a media bug and starts streaming audio (in L16 format) to the websocket server. FS default is 8k. If sampling-rate is other than 8k it will be resampled. Passing `mute_user` delays forwarding caller audio to the Realtime API until you explicitly unmute.
 - `uuid` - Freeswitch channel unique id
 - `wss-url` - websocket url `ws://` or `wss://`
 - `mix-type` - choice of 
   - "mono" - single channel containing caller's audio
   - "mixed" - single channel containing both caller and callee audio
   - "stereo" - two channels with caller audio in one and callee audio in the other.
-- `sampling-rate` - choice of
+- `sampling-rate` - optional, choice of
   - "8k" = 8000 Hz sample rate will be generated
   - "16k" = 16000 Hz sample rate will be generated
   - "24k" = 24000 Hz sample rate will be generated
+- `mute_user` - optional flag. When present, the module initialises muted and ignores caller audio until an explicit `unmute`.
 - **IMPORTANT NOTE**: The OpenAI Realtime API, when using PCM audio format, expects the audio to be in 24 kHz sample rate. Use the sampling-rate parameter as `24k` (or `24000`) and mono to ensure that the audio is sent in the correct format. From the OpenAI Realtime API documentation: *input audio must be 16-bit PCM at a 24kHz sample rate, single channel (mono), and little-endian byte order.* Support for exchanging audio with OpenAI in other formats may be developed in the future, which would make the `<sampling-rate>` and `<mono<` parameters useful for controlling the output format dynamically.
 
 ```
@@ -158,12 +159,22 @@ uuid_openai_audio_stream <uuid> stop
 ```
 uuid_openai_audio_stream <uuid> pause
 ```
-Pauses audio stream
+Pauses audio streaming in both directions. Caller audio stops flowing to OpenAI and any OpenAI playback currently buffering into the channel is halted until `resume`.
 
 ```
 uuid_openai_audio_stream <uuid> resume
 ```
-Resumes audio stream
+Resumes audio streaming in both directions after a `pause`.
+
+```
+uuid_openai_audio_stream <uuid> mute
+```
+Keeps the media bug alive but blocks upstream caller audio. Useful while you wait for a session update or play an intro prompt.
+
+```
+uuid_openai_audio_stream <uuid> unmute
+```
+Re-enables caller audio towards OpenAI after a `start ... mute_user` or `mute`.
 
 ## Events
 Module will generate the following event types:

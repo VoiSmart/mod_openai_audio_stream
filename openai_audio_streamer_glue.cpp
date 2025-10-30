@@ -286,14 +286,18 @@ public:
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - error: %s\n", m_sessionId.c_str(), message.c_str());
 
         } else if(jsType && strcmp(jsType, "input_audio_buffer.speech_started") == 0) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - speech started\n", m_sessionId.c_str());
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - user speech started\n", m_sessionId.c_str());
             clear_audio_queue();
             // also clear the private_t playback buffer used in write frame
             playback_clear_requested = true;
 
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - speech detected stopping audio playback\n", m_sessionId.c_str());
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - user speech detected stopping audio playback\n", m_sessionId.c_str());
 
             status = SWITCH_TRUE;
+
+        } else if (jsType && strcmp(jsType, "input_audio_buffer.speech_stopped") == 0) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) processMessage - user speech stopped\n", m_sessionId.c_str());
+            playback_clear_requested = false;
 
         } else if(jsType && strcmp(jsType, "response.output_audio.delta") == 0) {
             const char* jsonAudio = cJSON_GetObjectCstr(json, "delta");
@@ -488,7 +492,8 @@ namespace {
                                          uint32_t sampling, int desiredSampling, int channels, responseHandler_t responseHandler,
                                          int deflate, int heart_beat, bool suppressLog, int rtp_packets, const char* extra_headers,
                                          bool no_reconnect, const char *tls_cafile, const char *tls_keyfile,
-                                         const char *tls_certfile, bool tls_disable_hostname_validation, bool disable_audiofiles)
+                                         const char *tls_certfile, bool tls_disable_hostname_validation, bool disable_audiofiles,
+                                         switch_bool_t start_muted)
         {
             int err; //speex
 
@@ -505,6 +510,7 @@ namespace {
             tech_pvt->rtp_packets = rtp_packets;
             tech_pvt->channels = channels;
             tech_pvt->audio_paused = 0;
+            tech_pvt->user_audio_muted = start_muted ? 1 : 0;
 
             const size_t buflen = (FRAME_SIZE_8000 * desiredSampling / 8000 * channels * rtp_packets);
             const size_t playback_buflen = 128000; // 128Kb may need to be decreased 
@@ -766,12 +772,35 @@ extern "C" {
         return SWITCH_STATUS_SUCCESS;
     }
 
+    switch_status_t stream_session_set_user_mute(switch_core_session_t *session, int mute) {
+        switch_channel_t *channel = switch_core_session_get_channel(session);
+        auto *bug = (switch_media_bug_t*) switch_channel_get_private(channel, MY_BUG_NAME);
+        if (!bug) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_set_user_mute failed because no bug\n");
+            return SWITCH_STATUS_FALSE;
+        }
+        auto *tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
+        if (!tech_pvt) {
+            return SWITCH_STATUS_FALSE;
+        }
+
+        switch_core_media_bug_flush(bug);
+        tech_pvt->user_audio_muted = mute ? 1 : 0;
+        if (mute) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "User audio muted\n");
+        } else {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "User audio unmuted\n");
+        }
+        return SWITCH_STATUS_SUCCESS;
+    }
+
     switch_status_t stream_session_init(switch_core_session_t *session,
                                         responseHandler_t responseHandler,
                                         uint32_t samples_per_second,
                                         char *wsUri,
                                         int sampling,
                                         int channels,
+                                        switch_bool_t start_muted,
                                         void **ppUserData)
     {
         int deflate = 0, heart_beat = 0;
@@ -852,7 +881,7 @@ extern "C" {
             return SWITCH_STATUS_FALSE;
         }
         if (SWITCH_STATUS_SUCCESS != stream_data_init(tech_pvt, session, wsUri, samples_per_second, sampling, channels, responseHandler, deflate, heart_beat,
-                                                        suppressLog, rtp_packets, extra_headers, no_reconnect, tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, disable_audiofiles)) {
+                                                        suppressLog, rtp_packets, extra_headers, no_reconnect, tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, disable_audiofiles, start_muted)) {
             destroy_tech_pvt(tech_pvt);
             return SWITCH_STATUS_FALSE;
         }
@@ -865,7 +894,7 @@ extern "C" {
     switch_bool_t stream_frame(switch_media_bug_t *bug)
     {
         auto* tech_pvt = (private_t*) switch_core_media_bug_get_user_data(bug);
-        if (!tech_pvt || tech_pvt->audio_paused) return SWITCH_TRUE;
+        if (!tech_pvt || tech_pvt->audio_paused || tech_pvt->user_audio_muted) return SWITCH_TRUE;
 
         if (switch_mutex_trylock(tech_pvt->mutex) == SWITCH_STATUS_SUCCESS) {
 
