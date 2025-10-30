@@ -31,6 +31,7 @@ struct private_data {
     int channels;
     int audio_paused:1;
     int user_audio_muted:1;
+    int openai_audio_muted:1;
     int close_requested:1;
     RingBuffer *buffer;
     switch_buffer_t *sbuffer;

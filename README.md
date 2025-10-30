@@ -167,14 +167,17 @@ uuid_openai_audio_stream <uuid> resume
 Resumes audio streaming in both directions after a `pause`.
 
 ```
-uuid_openai_audio_stream <uuid> mute
+uuid_openai_audio_stream <uuid> mute [user | openai | all]
 ```
-Keeps the media bug alive but blocks upstream caller audio. Useful while you wait for a session update or play an intro prompt.
+Keeps the media bug alive while silencing the selected leg. Defaults to `user` when omitted.
+- `user`: block caller audio being sent to OpenAI.
+- `openai`: block OpenAI playback from reaching the channel.
+- `all`: apply both mute operations at once.
 
 ```
-uuid_openai_audio_stream <uuid> unmute
+uuid_openai_audio_stream <uuid> unmute [user | openai | all]
 ```
-Re-enables caller audio towards OpenAI after a `start ... mute_user` or `mute`.
+Re-enables the selected audio leg after a corresponding `mute`. Defaults to `user` when omitted.
 
 ## Events
 Module will generate the following event types:

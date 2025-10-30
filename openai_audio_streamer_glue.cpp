@@ -507,6 +507,7 @@ namespace {
             tech_pvt->channels = channels;
             tech_pvt->audio_paused = 0;
             tech_pvt->user_audio_muted = start_muted ? 1 : 0;
+            tech_pvt->openai_audio_muted = 0;
 
             const size_t buflen = (FRAME_SIZE_8000 * desiredSampling / 8000 * channels * rtp_packets);
             const size_t playback_buflen = 128000; // 128Kb may need to be decreased 
@@ -790,6 +791,28 @@ extern "C" {
         return SWITCH_STATUS_SUCCESS;
     }
 
+    switch_status_t stream_session_set_openai_mute(switch_core_session_t *session, int mute) {
+        switch_channel_t *channel = switch_core_session_get_channel(session);
+        auto *bug = static_cast<switch_media_bug_t *>(switch_channel_get_private(channel, MY_BUG_NAME));
+        if (!bug) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_set_openai_mute failed because no bug\n");
+            return SWITCH_STATUS_FALSE;
+        }
+
+        auto *tech_pvt = static_cast<private_t*>(switch_core_media_bug_get_user_data(bug));
+        if (!tech_pvt) {
+            return SWITCH_STATUS_FALSE;
+        }
+
+        switch_core_media_bug_flush(bug);
+        tech_pvt->openai_audio_muted = mute ? 1 : 0;
+
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                          "OpenAI audio %s\n", mute ? "muted" : "unmuted");
+
+        return SWITCH_STATUS_SUCCESS;
+    }
+
     switch_status_t stream_session_init(switch_core_session_t *session,
                                         responseHandler_t responseHandler,
                                         uint32_t samples_per_second,
@@ -1027,7 +1050,6 @@ extern "C" {
         uint32_t inuse = switch_buffer_inuse(tech_pvt->playback_buffer);
 
         // push a chunk in the audio buffer used treated as cache
-
         if (as->clear_requested()) {
             switch_buffer_zero(tech_pvt->playback_buffer);
             inuse = 0;
@@ -1043,22 +1065,26 @@ extern "C" {
             return SWITCH_TRUE;
         }
 
-        switch_byte_t *data = static_cast<switch_byte_t *>(frame->data);
-
         if (inuse > bytes_needed) {
-            switch_buffer_read(tech_pvt->playback_buffer, data, bytes_needed);
-        } else { 
+            inuse = bytes_needed;
+        }
+
+        if (tech_pvt->openai_audio_muted) {
+            switch_buffer_toss(tech_pvt->playback_buffer, inuse);
+        } else {
+            switch_byte_t *data = static_cast<switch_byte_t *>(frame->data);
+
             switch_buffer_read(tech_pvt->playback_buffer, data, inuse);
+
+            if (!as->is_openai_speaking()) {
+                as->openai_speech_started();
+            }
+
+            frame->datalen = inuse;
+            frame->samples = frame->datalen / bytes_per_sample;
+
+            switch_core_media_bug_set_write_replace_frame(bug, frame);
         }
-
-        if (!as->is_openai_speaking()) {
-            as->openai_speech_started();
-        }
-
-        frame->datalen = inuse > bytes_needed ? bytes_needed : inuse;
-        frame->samples = frame->datalen / bytes_per_sample;
-
-        switch_core_media_bug_set_write_replace_frame(bug, frame);
 
         return SWITCH_TRUE;
     }

@@ -128,12 +128,27 @@ static switch_status_t do_pauseresume(switch_core_session_t *session, int pause)
     return status;
 }
 
-static switch_status_t do_user_mute(switch_core_session_t *session, int mute)
+static switch_status_t do_audio_mute(switch_core_session_t *session, const char *target, int mute)
 {
-    switch_status_t status = SWITCH_STATUS_SUCCESS;
+    switch_status_t status = SWITCH_STATUS_FALSE;
+    const char *which = target && *target ? target : "user";
 
-    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "mod_openai_audio_stream: %s\n", mute ? "mute" : "unmute");
-    status = stream_session_set_user_mute(session, mute);
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                      "mod_openai_audio_stream: %s %s audio\n", mute ? "mute" : "unmute", which);
+
+    if (!strcasecmp(which, "user")) {
+        status = stream_session_set_user_mute(session, mute);
+    } else if (!strcasecmp(which, "openai")) {
+        status = stream_session_set_openai_mute(session, mute);
+    } else if (!strcasecmp(which, "all") || !strcasecmp(which, "both")) {
+        switch_status_t user_status = stream_session_set_user_mute(session, mute);
+        switch_status_t openai_status = stream_session_set_openai_mute(session, mute);
+        status = (user_status == SWITCH_STATUS_SUCCESS && openai_status == SWITCH_STATUS_SUCCESS) ? SWITCH_STATUS_SUCCESS : SWITCH_STATUS_FALSE;
+    } else {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                          "mod_openai_audio_stream: invalid mute target '%s', expected user|openai|all\n", which);
+        status = SWITCH_STATUS_FALSE;
+    }
 
     return status;
 }
@@ -152,7 +167,17 @@ static switch_status_t send_json(switch_core_session_t *session, char* json) {
     return status;
 }
 
-#define STREAM_API_SYNTAX "<uuid> [start | stop | send_json | pause | resume | mute | unmute | graceful-shutdown ] [wss-url | path] [mono | mixed | stereo] [8000 | 16000 | 24000] [mute_user]"
+#define STREAM_API_SYNTAX \
+"USAGE:\n" \
+"--------------------------------------------------------------------------------\n" \
+"uuid_openai_audio_stream <uuid> [start | stop | send_json | pause | resume |\n" \
+"                                 mute | unmute | graceful-shutdown]\n" \
+"                                [wss-url | path | user | openai | all | base64json]\n" \
+"                                [mono | mixed | stereo]\n" \
+"                                [8000 | 16000 | 24000]\n" \
+"                                [mute_user]\n" \
+"--------------------------------------------------------------------------------\n"
+
 SWITCH_STANDARD_API(stream_function)
 {
     char *mycmd = NULL, *argv[8] = { 0 };
@@ -167,7 +192,7 @@ SWITCH_STANDARD_API(stream_function)
 
     if (zstr(cmd) || argc < 2 || (0 == strcmp(argv[1], "start") && argc < 4)) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Error with command %s.\n", cmd);
-        stream->write_function(stream, "-USAGE: %s\n", STREAM_API_SYNTAX);
+        stream->write_function(stream, "%s\n", STREAM_API_SYNTAX);
         goto done;
     } else {
         if (strcasecmp(argv[1], "send_json")) { 
@@ -251,9 +276,11 @@ SWITCH_STANDARD_API(stream_function)
                     status = start_capture(lsession, flags, wsUri, sampling, start_muted);
                 }
             } else if (!strcasecmp(argv[1], "mute")) {
-                status = do_user_mute(lsession, 1);
+                const char *target = (argc > 2) ? argv[2] : "user";
+                status = do_audio_mute(lsession, target, 1);
             } else if (!strcasecmp(argv[1], "unmute")) {
-                status = do_user_mute(lsession, 0);
+                const char *target = (argc > 2) ? argv[2] : "user";
+                status = do_audio_mute(lsession, target, 0);
             } else {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                   "unsupported mod_openai_audio_stream cmd: %s\n", argv[1]);
