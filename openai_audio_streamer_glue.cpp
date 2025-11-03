@@ -4,6 +4,7 @@
 #include <ixwebsocket/IXWebSocket.h>
 #include <sstream>
 #include <queue>
+#include <vector>
 
 #include <switch_json.h>
 #include <fstream>
@@ -768,26 +769,60 @@ extern "C" {
     switch_status_t stream_session_set_user_mute(switch_core_session_t *session, int mute) {
         switch_channel_t *channel = switch_core_session_get_channel(session);
         auto *bug = static_cast<switch_media_bug_t *>(switch_channel_get_private(channel, MY_BUG_NAME));
+        switch_status_t status = SWITCH_STATUS_FALSE;
         if (!bug) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "stream_session_set_user_mute failed because no bug\n");
-            return SWITCH_STATUS_FALSE;
+            return status;
         }
         auto *tech_pvt = static_cast<private_t*>(switch_core_media_bug_get_user_data(bug));
         if (!tech_pvt) {
-            return SWITCH_STATUS_FALSE;
+            return status;
         }
 
+        status = SWITCH_STATUS_SUCCESS;
         switch_core_media_bug_flush(bug);
-        auto last_state = tech_pvt->user_audio_muted;
+        const int last_state = tech_pvt->user_audio_muted;
         tech_pvt->user_audio_muted = mute ? 1 : 0;
         if (last_state == tech_pvt->user_audio_muted) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
                               "User audio is already %s\n", tech_pvt->user_audio_muted ? "muted" : "unmuted");
-        } else {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
-                          "User audio %s\n", tech_pvt->user_audio_muted ? "muted" : "unmuted");
+            return status;
         }
-        return SWITCH_STATUS_SUCCESS;
+
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                          "User audio %s\n", tech_pvt->user_audio_muted ? "muted" : "unmuted");
+
+        if (tech_pvt->user_audio_muted) {
+            if (tech_pvt->mutex) {
+                switch_mutex_lock(tech_pvt->mutex);
+            }
+
+            if (tech_pvt->buffer) {
+                ringBufferClear(tech_pvt->buffer);
+            }
+            if (tech_pvt->sbuffer) {
+                switch_buffer_zero(tech_pvt->sbuffer);
+            }
+
+            AudioStreamer *streamer = static_cast<AudioStreamer *>(tech_pvt->pAudioStreamer);
+            if (streamer && streamer->isConnected()) {
+                size_t channels = tech_pvt->channels > 0 ? static_cast<size_t>(tech_pvt->channels) : 1;
+                size_t sample_rate = tech_pvt->sampling > 0 ? static_cast<size_t>(tech_pvt->sampling) : 24000; // 24 KHz is currently the only supported rate by openai
+                size_t bytes = channels * sample_rate * sizeof(int16_t);
+                std::vector<uint8_t> silence(bytes, 0);
+                streamer->writeAudioDelta(silence.data(), silence.size());
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG,
+                                  "Sent %zu bytes of silence after muting user audio\n", silence.size());
+            } else {
+                status = SWITCH_STATUS_FALSE;
+            }
+
+            if (tech_pvt->mutex) {
+                switch_mutex_unlock(tech_pvt->mutex);
+            }
+        }
+
+        return status;
     }
 
     switch_status_t stream_session_set_openai_mute(switch_core_session_t *session, int mute) {
