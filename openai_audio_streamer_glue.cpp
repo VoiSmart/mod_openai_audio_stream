@@ -347,26 +347,19 @@ public:
 
     // managing queue, check if empty before popping or peeking
     
-    bool is_audio_queue_empty() {
-        std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
-        return m_audio_queue.empty();
-    }
-
     void push_audio_queue(const std::vector<int16_t>& audio_data) {
         std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
         m_audio_queue.push(audio_data);
     }
 
-    std::vector<int16_t> pop_audio_queue() {
+    bool pop_audio_queue(std::vector<int16_t> &out_audio) {
         std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
-        auto audio_data = m_audio_queue.front();
+        if (m_audio_queue.empty()) {
+            return false;
+        }
+        out_audio = m_audio_queue.front();
         m_audio_queue.pop();
-        return audio_data;
-    }
-
-    std::vector<int16_t> peek_audio_queue() {
-        std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
-        return m_audio_queue.front();
+        return true;
     }
 
     void clear_audio_queue() {
@@ -444,20 +437,29 @@ public:
     void openai_speech_started() {
         m_openai_speaking = true;
         switch_core_session_t* psession = switch_core_session_locate(m_sessionId.c_str());
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "(%s) Openai started speaking\n", m_sessionId.c_str());
-        const char *payload = "{\"status\":\"started\"}";
-        m_notify(psession, EVENT_OPENAI_SPEECH_STARTED, payload);
-        switch_core_session_rwunlock(psession);
+
+        if (psession) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "(%s) Openai started speaking\n", m_sessionId.c_str());
+            const char *payload = "{\"status\":\"started\"}";
+            m_notify(psession, EVENT_OPENAI_SPEECH_STARTED, payload);
+            switch_core_session_rwunlock(psession);
+        } else {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "(%s) Openai speech started - could not locate session\n", m_sessionId.c_str());
+        }
      }
 
     void openai_speech_stopped() {
         m_openai_speaking = false;
         switch_core_session_t* psession = switch_core_session_locate(m_sessionId.c_str());
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "(%s) Openai stopped speaking\n", m_sessionId.c_str());
 
-        const char *payload = "{\"status\":\"stopped\"}";
-        m_notify(psession, EVENT_OPENAI_SPEECH_STOPPED, payload);
-        switch_core_session_rwunlock(psession);
+        if (psession) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "(%s) Openai stopped speaking\n", m_sessionId.c_str());
+            const char *payload = "{\"status\":\"stopped\"}";
+            m_notify(psession, EVENT_OPENAI_SPEECH_STOPPED, payload);
+            switch_core_session_rwunlock(psession);
+        } else {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "(%s) Openai speech stopped - could not locate session\n", m_sessionId.c_str());
+        }
      }
 
 
@@ -510,13 +512,7 @@ namespace {
             tech_pvt->openai_audio_muted = 0;
 
             const size_t buflen = (FRAME_SIZE_8000 * desiredSampling / 8000 * channels * rtp_packets);
-            const size_t playback_buflen = 128000; // 128Kb may need to be decreased 
-
-            if (switch_mutex_init(&tech_pvt->playback_mutex, SWITCH_MUTEX_NESTED, pool) != SWITCH_STATUS_SUCCESS) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-                                  "%s: Error creating playback mutex.\n", tech_pvt->sessionId);
-                return SWITCH_STATUS_FALSE;
-            }
+            const size_t playback_buflen = 128000; // 128KB may need to be decreased 
 
             if (switch_buffer_create(pool, &tech_pvt->playback_buffer, playback_buflen) != SWITCH_STATUS_SUCCESS) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
@@ -782,11 +778,14 @@ extern "C" {
         }
 
         switch_core_media_bug_flush(bug);
+        auto last_state = tech_pvt->user_audio_muted;
         tech_pvt->user_audio_muted = mute ? 1 : 0;
-        if (mute) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "User audio muted\n");
+        if (last_state == tech_pvt->user_audio_muted) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                              "User audio is already %s\n", tech_pvt->user_audio_muted ? "muted" : "unmuted");
         } else {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "User audio unmuted\n");
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                          "User audio %s\n", tech_pvt->user_audio_muted ? "muted" : "unmuted");
         }
         return SWITCH_STATUS_SUCCESS;
     }
@@ -805,10 +804,15 @@ extern "C" {
         }
 
         switch_core_media_bug_flush(bug);
+        auto last_state = tech_pvt->openai_audio_muted;
         tech_pvt->openai_audio_muted = mute ? 1 : 0;
-
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
-                          "OpenAI audio %s\n", mute ? "muted" : "unmuted");
+        if (last_state == tech_pvt->openai_audio_muted) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                              "OpenAI audio is already %s\n", tech_pvt->openai_audio_muted ? "muted" : "unmuted");
+        } else {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                              "OpenAI audio %s\n", tech_pvt->openai_audio_muted ? "muted" : "unmuted");
+        }
 
         return SWITCH_STATUS_SUCCESS;
     }
@@ -1054,10 +1058,15 @@ extern "C" {
             switch_buffer_zero(tech_pvt->playback_buffer);
             inuse = 0;
         }
-        if (inuse < bytes_needed * 2 && !as->is_audio_queue_empty()) {
-            auto chunk = as->pop_audio_queue();
-            switch_buffer_write(tech_pvt->playback_buffer, chunk.data(), chunk.size() * sizeof(int16_t));
-        } else if (inuse == 0) {
+        bool chunk_enqueued = false;
+        if (inuse < bytes_needed * 2) {
+            std::vector<int16_t> chunk;
+            if (as->pop_audio_queue(chunk)) {
+                switch_buffer_write(tech_pvt->playback_buffer, chunk.data(), chunk.size() * sizeof(int16_t));
+                chunk_enqueued = true;
+            }
+        }
+        if (!chunk_enqueued && inuse == 0) {
             // Openai just finished speaking for interruption or end of response
             if(as->is_openai_speaking() && as->is_response_audio_done()) { 
                 as->openai_speech_stopped();

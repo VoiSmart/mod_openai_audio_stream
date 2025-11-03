@@ -38,7 +38,6 @@ struct private_data {
     uint8_t *data;
     int rtp_packets;
     switch_buffer_t *playback_buffer;
-    switch_mutex_t *playback_mutex;
 };
 
 typedef struct private_data private_t;
