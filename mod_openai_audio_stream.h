@@ -30,13 +30,14 @@ struct private_data {
     int sampling;
     int channels;
     int audio_paused:1;
+    int user_audio_muted:1;
+    int openai_audio_muted:1;
     int close_requested:1;
     RingBuffer *buffer;
     switch_buffer_t *sbuffer;
     uint8_t *data;
     int rtp_packets;
     switch_buffer_t *playback_buffer;
-    switch_mutex_t *playback_mutex;
 };
 
 typedef struct private_data private_t;
