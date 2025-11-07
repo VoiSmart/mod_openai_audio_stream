@@ -936,22 +936,31 @@ extern "C" {
             return SWITCH_TRUE;
         }
 
+        // Pre-allocate reusable buffers to avoid repeated allocations
+        std::vector<uint8_t> flush_buffer;
+        std::vector<spx_int16_t> resample_buffer;
+
         auto flush_sbuffer = [&]() {
             switch_size_t inuse = switch_buffer_inuse(tech_pvt->sbuffer);
             if (inuse > 0) {
-                std::vector<uint8_t> tmp(inuse);
-                switch_buffer_read(tech_pvt->sbuffer, tmp.data(), inuse);
+                flush_buffer.resize(inuse);
+                switch_buffer_read(tech_pvt->sbuffer, flush_buffer.data(), inuse);
                 switch_buffer_zero(tech_pvt->sbuffer);
-                pAudioStreamer->writeAudioDelta(tmp.data(), inuse);
+                pAudioStreamer->writeAudioDelta(flush_buffer.data(), inuse);
             }
         };
 
-        uint8_t data_buf[SWITCH_RECOMMENDED_BUFFER_SIZE];
-        switch_frame_t frame = {0};
-        frame.data = data_buf;
+        std::vector<uint8_t> data_buf(SWITCH_RECOMMENDED_BUFFER_SIZE);
+        switch_frame_t frame{};
+        frame.data = data_buf.data();
         frame.buflen = SWITCH_RECOMMENDED_BUFFER_SIZE;
 
         while (switch_core_media_bug_read(bug, &frame, SWITCH_TRUE) == SWITCH_STATUS_SUCCESS) {
+            // Validate frame data before processing
+            if (frame.datalen == 0 || frame.samples == 0) {
+                continue;
+            }
+
             if (!tech_pvt->resampler) {
                 if (tech_pvt->rtp_packets == 1) {
                     pAudioStreamer->writeAudioDelta(static_cast<uint8_t *>(frame.data), frame.datalen);
@@ -961,10 +970,18 @@ extern "C" {
                     switch_size_t free_space = switch_buffer_freespace(tech_pvt->sbuffer);
                     if (write_len > free_space) {
                         flush_sbuffer();
+                        free_space = switch_buffer_freespace(tech_pvt->sbuffer);
                     }
-                    switch_buffer_write(tech_pvt->sbuffer, write_data, write_len);
-                    if (switch_buffer_freespace(tech_pvt->sbuffer) == 0) {
-                        flush_sbuffer();
+                    // Only write if buffer has enough space
+                    if (write_len <= free_space) {
+                        switch_buffer_write(tech_pvt->sbuffer, write_data, write_len);
+                        if (switch_buffer_freespace(tech_pvt->sbuffer) == 0) {
+                            flush_sbuffer();
+                        }
+                    } else {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                            "%s: Dropping %zu bytes of audio data, buffer capacity exceeded\n",
+                            tech_pvt->sessionId, write_len);
                     }
                 }
                 continue;
@@ -977,9 +994,16 @@ extern "C" {
                 flush_sbuffer();
                 available = switch_buffer_freespace(tech_pvt->sbuffer);
                 out_len = available / (tech_pvt->channels * sizeof(spx_int16_t));
+                // Skip processing if buffer still has no space after flushing
+                if (out_len == 0) {
+                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                        "%s: Buffer full, cannot process resampled frame\n",
+                        tech_pvt->sessionId);
+                    continue;
+                }
             }
 
-            spx_int16_t outbuf[out_len * tech_pvt->channels];
+            resample_buffer.resize(out_len * tech_pvt->channels);
 
             if (tech_pvt->channels == 1) {
                 speex_resampler_process_int(
@@ -987,7 +1011,7 @@ extern "C" {
                     0,
                     static_cast<const spx_int16_t *>(frame.data),
                     &in_len,
-                    outbuf,
+                    resample_buffer.data(),
                     &out_len
                 );
             } else {
@@ -995,25 +1019,40 @@ extern "C" {
                     tech_pvt->resampler,
                     static_cast<const spx_int16_t *>(frame.data),
                     &in_len,
-                    outbuf,
+                    resample_buffer.data(),
                     &out_len
                 );
             }
 
             size_t bytes_written = out_len * tech_pvt->channels * sizeof(spx_int16_t);
             if (bytes_written > 0) {
-                switch_buffer_write(
-                    tech_pvt->sbuffer,
-                    reinterpret_cast<const uint8_t *>(outbuf),
-                    bytes_written
-                );
-                if (switch_buffer_freespace(tech_pvt->sbuffer) == 0) {
-                    flush_sbuffer();
+                // For 20ms packets, send immediately without buffering
+                if (tech_pvt->rtp_packets == 1) {
+                    pAudioStreamer->writeAudioDelta(reinterpret_cast<uint8_t *>(resample_buffer.data()), bytes_written);
+                } else {
+                    // Check if buffer has enough space before writing
+                    switch_size_t free_space = switch_buffer_freespace(tech_pvt->sbuffer);
+                    if (bytes_written > free_space) {
+                        flush_sbuffer();
+                        free_space = switch_buffer_freespace(tech_pvt->sbuffer);
+                    }
+                    if (bytes_written <= free_space) {
+                        switch_buffer_write(
+                            tech_pvt->sbuffer,
+                            reinterpret_cast<const uint8_t *>(resample_buffer.data()),
+                            bytes_written
+                        );
+                        if (switch_buffer_freespace(tech_pvt->sbuffer) == 0) {
+                            flush_sbuffer();
+                        }
+                    } else {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                            "%s: Dropping %zu bytes of resampled audio data, buffer capacity exceeded\n",
+                            tech_pvt->sessionId, bytes_written);
+                    }
                 }
             }
         }
-
-        flush_sbuffer();
 
         switch_mutex_unlock(tech_pvt->mutex);
         return SWITCH_TRUE;
