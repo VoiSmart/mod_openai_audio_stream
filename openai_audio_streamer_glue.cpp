@@ -529,34 +529,10 @@ namespace {
 
             switch_mutex_init(&tech_pvt->mutex, SWITCH_MUTEX_NESTED, pool);
 
-            if (static_cast<uint32_t>(desiredSampling) != sampling) {
-                if (switch_buffer_create(pool, &tech_pvt->sbuffer, buflen) != SWITCH_STATUS_SUCCESS) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-                        "%s: Error creating switch buffer.\n", tech_pvt->sessionId);
-                    return SWITCH_STATUS_FALSE;
-                }
-            } else {
-                size_t adjSize = 1; //adjust the buffer size to the closest pow2 size
-                while(adjSize < buflen) {
-                    adjSize *= 2;
-                }
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "%s: initializing buffer(%zu) to adjusted %zu bytes\n",
-                              tech_pvt->sessionId, buflen, adjSize);
-                tech_pvt->data = static_cast<uint8_t *>(switch_core_alloc(pool, adjSize));
-                if (!tech_pvt->data) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-                                      "%s: Error allocating memory for data buffer.\n", tech_pvt->sessionId);
-                    return SWITCH_STATUS_FALSE;
-                }
-                memset(tech_pvt->data, 0, adjSize);
-                tech_pvt->buffer = static_cast<RingBuffer *>(switch_core_alloc(pool, sizeof(RingBuffer)));
-                if (!tech_pvt->buffer) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-                                      "%s: Error allocating memory for ring buffer.\n", tech_pvt->sessionId);
-                    return SWITCH_STATUS_FALSE;
-                }
-                memset(tech_pvt->buffer, 0, sizeof(RingBuffer));
-                ringBufferInit(tech_pvt->buffer, tech_pvt->data, adjSize);
+            if (switch_buffer_create(pool, &tech_pvt->sbuffer, buflen) != SWITCH_STATUS_SUCCESS) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                    "%s: Error creating switch buffer.\n", tech_pvt->sessionId);
+                return SWITCH_STATUS_FALSE;
             }
 
             if (static_cast<uint32_t>(desiredSampling) != sampling) {
@@ -797,9 +773,6 @@ extern "C" {
                 switch_mutex_lock(tech_pvt->mutex);
             }
 
-            if (tech_pvt->buffer) {
-                ringBufferClear(tech_pvt->buffer);
-            }
             if (tech_pvt->sbuffer) {
                 switch_buffer_zero(tech_pvt->sbuffer);
             }
@@ -948,116 +921,101 @@ extern "C" {
         return SWITCH_STATUS_SUCCESS;
     }
 
-    switch_bool_t stream_frame(switch_media_bug_t *bug)
-    {
-        auto* tech_pvt = static_cast<private_t*>(switch_core_media_bug_get_user_data(bug));
+    switch_bool_t stream_frame(switch_media_bug_t *bug) {
+        auto *tech_pvt = static_cast<private_t *>(switch_core_media_bug_get_user_data(bug));
         if (!tech_pvt || tech_pvt->audio_paused || tech_pvt->user_audio_muted) return SWITCH_TRUE;
 
-        if (switch_mutex_trylock(tech_pvt->mutex) == SWITCH_STATUS_SUCCESS) {
-
-            if (!tech_pvt->pAudioStreamer) {
-                switch_mutex_unlock(tech_pvt->mutex);
-                return SWITCH_TRUE;
-            }
-
-            auto *pAudioStreamer = static_cast<AudioStreamer *>(tech_pvt->pAudioStreamer);
-
-            if(!pAudioStreamer->isConnected()) {
-                switch_mutex_unlock(tech_pvt->mutex);
-                return SWITCH_TRUE;
-            }
-
-            if (nullptr == tech_pvt->resampler) {
-                uint8_t data[SWITCH_RECOMMENDED_BUFFER_SIZE];
-                switch_frame_t frame = {};
-                frame.data = data;
-                frame.buflen = SWITCH_RECOMMENDED_BUFFER_SIZE;
-                size_t inuse = ringBufferFreeSpace(tech_pvt->buffer);
-                while (switch_core_media_bug_read(bug, &frame, SWITCH_TRUE) == SWITCH_STATUS_SUCCESS) {
-                    if(frame.datalen) {
-                        if (1 == tech_pvt->rtp_packets) {
-                            pAudioStreamer->writeAudioDelta(static_cast<uint8_t *>(frame.data), frame.datalen);
-                            continue;
-                        }
-
-                        size_t remaining = 0;
-                        if(inuse >= frame.datalen) {
-                            ringBufferAppendMultiple(tech_pvt->buffer, static_cast<uint8_t *>(frame.data), frame.datalen);
-                        } else {
-                            // The remaining space is not sufficient for the entire chunk
-                            // so write first part up to the inuse space
-                            ringBufferAppendMultiple(tech_pvt->buffer, static_cast<uint8_t *>(frame.data), inuse);
-                            remaining = frame.datalen - inuse;
-                        }
-
-                        if(0 == ringBufferFreeSpace(tech_pvt->buffer)) {
-                            size_t nFrames = ringBufferLen(tech_pvt->buffer);
-                            size_t nBytes = nFrames + remaining;
-                            uint8_t chunkPtr[nBytes];
-                            ringBufferGetMultiple(tech_pvt->buffer, &chunkPtr[0], nBytes);
-
-                            if(remaining > 0) {
-                                memcpy(&chunkPtr[nBytes - remaining], static_cast<uint8_t *>(frame.data) + frame.datalen - remaining, remaining);
-                            }
-
-                            pAudioStreamer->writeAudioDelta(chunkPtr, nBytes);
-
-                            ringBufferClear(tech_pvt->buffer);
-                        }
-
-                    }
-                }
-            } else {
-                uint8_t data[SWITCH_RECOMMENDED_BUFFER_SIZE];
-                switch_frame_t frame = {};
-                frame.data = data;
-                frame.buflen = SWITCH_RECOMMENDED_BUFFER_SIZE;
-                const size_t inuse = switch_buffer_freespace(tech_pvt->sbuffer);
-
-                while (switch_core_media_bug_read(bug, &frame, SWITCH_TRUE) == SWITCH_STATUS_SUCCESS) {
-                    if(frame.datalen) {
-                        spx_uint32_t in_len = frame.samples;
-                        spx_uint32_t out_len = (inuse / (tech_pvt->channels * sizeof(spx_int16_t)));
-                        spx_int16_t out[inuse / sizeof(spx_int16_t)];
-
-                        if(tech_pvt->channels == 1) {
-                            speex_resampler_process_int(tech_pvt->resampler,
-                                            0,
-                                            static_cast<const spx_int16_t *>(frame.data),
-                                            &in_len,
-                                            &out[0],
-                                            &out_len);
-                        } else {
-                            speex_resampler_process_interleaved_int(tech_pvt->resampler,
-                                            static_cast<const spx_int16_t *>(frame.data),
-                                            &in_len,
-                                            &out[0],
-                                            &out_len);
-                        }
-
-                        if(out_len > 0) {
-                            const size_t bytes_written = out_len * tech_pvt->channels * sizeof(spx_int16_t);
-                            if (tech_pvt->rtp_packets == 1) { //20ms packet
-                                pAudioStreamer->writeAudioDelta(reinterpret_cast<uint8_t *>(out), bytes_written);
-                                continue;
-                            }
-                            if (bytes_written <= inuse) {
-                                switch_buffer_write(tech_pvt->sbuffer, out, bytes_written);
-                            }
-                        }
-
-                        if(switch_buffer_freespace(tech_pvt->sbuffer) == 0) {
-                            const switch_size_t buf_len= switch_buffer_inuse(tech_pvt->sbuffer);
-                            uint8_t buf_ptr[buf_len];
-                            switch_buffer_read(tech_pvt->sbuffer, buf_ptr, buf_len);
-                            switch_buffer_zero(tech_pvt->sbuffer);
-                            pAudioStreamer->writeAudioDelta(buf_ptr, buf_len);
-                        }
-                    }
-                }
-            }
-            switch_mutex_unlock(tech_pvt->mutex);
+        if (switch_mutex_trylock(tech_pvt->mutex) != SWITCH_STATUS_SUCCESS) {
+            return SWITCH_TRUE;
         }
+
+        auto *pAudioStreamer = static_cast<AudioStreamer *>(tech_pvt->pAudioStreamer);
+
+        if (!pAudioStreamer || !pAudioStreamer->isConnected()) {
+            switch_mutex_unlock(tech_pvt->mutex);
+            return SWITCH_TRUE;
+        }
+
+        auto flush_sbuffer = [&]() {
+            switch_size_t inuse = switch_buffer_inuse(tech_pvt->sbuffer);
+            if (inuse > 0) {
+                std::vector<uint8_t> tmp(inuse);
+                switch_buffer_read(tech_pvt->sbuffer, tmp.data(), inuse);
+                switch_buffer_zero(tech_pvt->sbuffer);
+                pAudioStreamer->writeAudioDelta(tmp.data(), inuse);
+            }
+        };
+
+        uint8_t data_buf[SWITCH_RECOMMENDED_BUFFER_SIZE];
+        switch_frame_t frame = {0};
+        frame.data = data_buf;
+        frame.buflen = SWITCH_RECOMMENDED_BUFFER_SIZE;
+
+        while (switch_core_media_bug_read(bug, &frame, SWITCH_TRUE) == SWITCH_STATUS_SUCCESS) {
+            if (!tech_pvt->resampler) {
+                if (tech_pvt->rtp_packets == 1) {
+                    pAudioStreamer->writeAudioDelta(static_cast<uint8_t *>(frame.data), frame.datalen);
+                } else {
+                    size_t write_len = frame.datalen;
+                    const uint8_t *write_data = static_cast<const uint8_t *>(frame.data);
+                    switch_size_t free_space = switch_buffer_freespace(tech_pvt->sbuffer);
+                    if (write_len > free_space) {
+                        flush_sbuffer();
+                    }
+                    switch_buffer_write(tech_pvt->sbuffer, write_data, write_len);
+                    if (switch_buffer_freespace(tech_pvt->sbuffer) == 0) {
+                        flush_sbuffer();
+                    }
+                }
+                continue;
+            }
+
+            size_t available = switch_buffer_freespace(tech_pvt->sbuffer);
+            spx_uint32_t in_len = frame.samples;
+            spx_uint32_t out_len = available / (tech_pvt->channels * sizeof(spx_int16_t));
+            if (out_len == 0) {
+                flush_sbuffer();
+                available = switch_buffer_freespace(tech_pvt->sbuffer);
+                out_len = available / (tech_pvt->channels * sizeof(spx_int16_t));
+            }
+
+            spx_int16_t outbuf[out_len * tech_pvt->channels];
+
+            if (tech_pvt->channels == 1) {
+                speex_resampler_process_int(
+                    tech_pvt->resampler,
+                    0,
+                    static_cast<const spx_int16_t *>(frame.data),
+                    &in_len,
+                    outbuf,
+                    &out_len
+                );
+            } else {
+                speex_resampler_process_interleaved_int(
+                    tech_pvt->resampler,
+                    static_cast<const spx_int16_t *>(frame.data),
+                    &in_len,
+                    outbuf,
+                    &out_len
+                );
+            }
+
+            size_t bytes_written = out_len * tech_pvt->channels * sizeof(spx_int16_t);
+            if (bytes_written > 0) {
+                switch_buffer_write(
+                    tech_pvt->sbuffer,
+                    reinterpret_cast<const uint8_t *>(outbuf),
+                    bytes_written
+                );
+                if (switch_buffer_freespace(tech_pvt->sbuffer) == 0) {
+                    flush_sbuffer();
+                }
+            }
+        }
+
+        flush_sbuffer();
+
+        switch_mutex_unlock(tech_pvt->mutex);
         return SWITCH_TRUE;
     }
 
